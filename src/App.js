@@ -4,6 +4,33 @@ const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
+// ─── MARKET HOURS CHECK ──────────────────────────────────────────────────────
+function isMarketOpen() {
+  const now = new Date();
+  const et = new Date(now.toLocaleString("en-US", {timeZone:"America/New_York"}));
+  const day = et.getDay();
+  if(day === 0 || day === 6) return false;
+  const h = et.getHours(), m = et.getMinutes();
+  const mins = h * 60 + m;
+  return mins >= 570 && mins < 960; // 9:30 AM - 4:00 PM ET
+}
+function MarketBanner() {
+  const open = isMarketOpen();
+  if(open) return null;
+  const now = new Date();
+  const et = new Date(now.toLocaleString("en-US",{timeZone:"America/New_York"}));
+  const day = et.getDay();
+  const isWeekend = day===0||day===6;
+  return (
+    <div style={{background:"#1a0a00",border:"1px solid #ff6600",borderRadius:6,padding:"8px 14px",margin:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
+      <span style={{fontSize:16}}>⚠️</span>
+      <span style={{fontSize:11,color:"#ff9800",fontWeight:700}}>
+        {isWeekend ? "MARKET CLOSED — Weekend. Opens Monday 9:30 AM ET." : "MARKET CLOSED — After hours. Opens 9:30 AM ET. Data may be delayed or empty."}
+      </span>
+    </div>
+  );
+}
+
 // ─── TIMEFRAME PARSER ────────────────────────────────────────────────────────
 function parseTF(tf) {
   const s = tf.trim().toLowerCase();
@@ -440,6 +467,7 @@ function EMAScanner({symbols}){
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
       </div>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
           <Stat label="TOTAL" value={results.length}/>
           <Stat label="BEARISH" value={results.filter(r=>r.allSlopingDown).length} color="#ff1744"/>
@@ -544,10 +572,11 @@ function HalfTrendScanner({symbols}){
         const price=(r1||r2||r3||r4)?.price||"—";
         const isSell=direction==="SELL";
         const htResults=[r1,r2,r3,r4];
-        const aligned=htResults.filter(Boolean).every(r=>isSell?r.trend===1:r.trend===0);
         const matchCount=htResults.filter(r=>r&&(isSell?r.trend===1:r.trend===0)).length;
         const totalFetched=htResults.filter(Boolean).length;
+        const aligned=totalFetched===4&&matchCount===4;
         const flipCount=htResults.filter(r=>r&&(isSell?r.sellSignal:r.buySignal)).length;
+        if(totalFetched===0) continue;
         all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount});
       } catch(e){failed.push(sym);}
       setProg({done:i+1,total:syms.length});
@@ -601,6 +630,7 @@ function HalfTrendScanner({symbols}){
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
       </div>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
           <Stat label="TOTAL" value={results.length}/>
           <Stat label="FULL ALIGN★" value={fullyAligned} color={direction==="SELL"?"#ff1744":"#00e676"}/>
@@ -677,19 +707,15 @@ function SHAHTScanner({symbols}){
         const shahtResults=[r1,r2,r3,r4];
 
         // BOTH algo1 AND algo2 must match direction on ALL timeframes
-        const fullyAligned=shahtResults.filter(Boolean).every(r=>{
-          const dirMatch=isSell?(r.algo1==="DOWN"&&r.algo2==="DOWN"):(r.algo1==="UP"&&r.algo2==="UP");
-          return dirMatch;
-        });
-
-        // Count how many TFs have both agreeing in right direction
         const matchCount=shahtResults.filter(r=>r&&(isSell?(r.algo1==="DOWN"&&r.algo2==="DOWN"):(r.algo1==="UP"&&r.algo2==="UP"))).length;
         const totalFetched=shahtResults.filter(Boolean).length;
+        const fullyAligned=totalFetched===4&&matchCount===4;
 
         // Flip count — HalfTrend just flipped on any TF
         const flipCount=shahtResults.filter(r=>r&&(isSell?r.htSellSignal:r.htBuySignal)).length;
         const shaFlipCount=shahtResults.filter(r=>r&&r.shaFlipped&&(isSell?!r.isBull:r.isBull)).length;
 
+        if(totalFetched===0) continue;
         all.push({symbol:sym,price,r1,r2,r3,r4,fullyAligned,matchCount,totalFetched,flipCount,shaFlipCount});
       } catch(e){failed.push(sym);}
       setProg({done:i+1,total:syms.length});
@@ -756,6 +782,7 @@ function SHAHTScanner({symbols}){
       </div>
 
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
           <Stat label="TOTAL" value={results.length}/>
           <Stat label="★ FULL SIGNAL" value={fullyAligned} color={direction==="SELL"?"#e040fb":"#69f0ae"}/>
