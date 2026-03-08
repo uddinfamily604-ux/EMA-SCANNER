@@ -349,12 +349,19 @@ function SHAHTBadge({result}){
 
 // ─── EMA SCANNER ─────────────────────────────────────────────────────────────
 function EMAScanner({symbols}){
-  const [ema1,setEma1]=useState(50),[ema2,setEma2]=useState(100),[ema3,setEma3]=useState(200);
-  const [tf,setTf]=useState("1h"),[maxSpread,setMaxSpread]=useState(1.5);
-  const [minSlope,setMinSlope]=useState(0),[filterMode,setFilterMode]=useState("ALL");
-  const [results,setResults]=useState([]),[scanning,setScanning]=useState(false);
-  const [sortBy,setSortBy]=useState("score"),[selRow,setSelRow]=useState(null);
-  const [lastScan,setLastScan]=useState(null),[prog,setProg]=useState({done:0,total:0});
+  const [ema1,setEma1]=useState(50);
+  const [ema2,setEma2]=useState(100);
+  const [ema3,setEma3]=useState(200);
+  const [tf,setTf]=useState("1h");
+  const [maxSpread,setMaxSpread]=useState(1.5);
+  const [minSlope,setMinSlope]=useState(0);
+  const [filterMode,setFilterMode]=useState("ALL");
+  const [results,setResults]=useState([]);
+  const [scanning,setScanning]=useState(false);
+  const [sortBy,setSortBy]=useState("score");
+  const [selRow,setSelRow]=useState(null);
+  const [lastScan,setLastScan]=useState(null);
+  const [prog,setProg]=useState({done:0,total:0});
   const [errors,setErrors]=useState([]);
 
   const runScan=useCallback(async()=>{
@@ -518,8 +525,10 @@ function HalfTrendScanner({symbols}){
   const [tf3,setTf3]=useState("5m");
   const [tf4,setTf4]=useState("1m");
   const [direction,setDirection]=useState("SELL");
-  const [results,setResults]=useState([]),[scanning,setScanning]=useState(false);
-  const [lastScan,setLastScan]=useState(null),[prog,setProg]=useState({done:0,total:0});
+  const [results,setResults]=useState([]);
+  const [scanning,setScanning]=useState(false);
+  const [lastScan,setLastScan]=useState(null);
+  const [prog,setProg]=useState({done:0,total:0});
   const [errors,setErrors]=useState([]);
   const tfs=[tf1,_tf2,tf3,tf4];
 
@@ -647,8 +656,10 @@ function SHAHTScanner({symbols}){
   const [tf3,setTf3]=useState("5m");
   const [tf4,setTf4]=useState("1m");
   const [direction,setDirection]=useState("SELL");
-  const [results,setResults]=useState([]),[scanning,setScanning]=useState(false);
-  const [lastScan,setLastScan]=useState(null),[prog,setProg]=useState({done:0,total:0});
+  const [results,setResults]=useState([]);
+  const [scanning,setScanning]=useState(false);
+  const [lastScan,setLastScan]=useState(null);
+  const [prog,setProg]=useState({done:0,total:0});
   const [errors,setErrors]=useState([]);
   const tfs=[tf1,tf2,tf3,tf4];
 
