@@ -513,7 +513,7 @@ function EMAScanner({symbols}){
 
 // ─── HALFTREND MTF SCANNER ───────────────────────────────────────────────────
 function HalfTrendScanner({symbols}){
-  const [tf1,setTf1]=useState("1h"),([ tf2,setTf2])=useState(["15m",v=>v]);
+  const [tf1,setTf1]=useState("1h");
   const [_tf2,_setTf2]=useState("15m");
   const [tf3,setTf3]=useState("5m");
   const [tf4,setTf4]=useState("1m");
