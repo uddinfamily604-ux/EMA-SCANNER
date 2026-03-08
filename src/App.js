@@ -841,8 +841,22 @@ function SHAHTScanner({symbols}){
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 export default function App(){
-  const [symbols,setSymbols]=useState(DEFAULT_SYMBOLS.join(","));
-  const [activeTab,setActiveTab]=useState("ema");
+  const [symbols,setSymbols]=useState(()=>{
+    try { const s=localStorage.getItem("alo_watchlist"); return s||DEFAULT_SYMBOLS.join(","); } 
+    catch(e){ return DEFAULT_SYMBOLS.join(","); }
+  });
+  const [activeTab,setActiveTab]=useState(()=>{
+    try { return localStorage.getItem("alo_tab")||"ema"; } catch(e){ return "ema"; }
+  });
+
+  const updateSymbols=(val)=>{
+    setSymbols(val);
+    try { localStorage.setItem("alo_watchlist",val); } catch(e){}
+  };
+  const updateTab=(id)=>{
+    setActiveTab(id);
+    try { localStorage.setItem("alo_tab",id); } catch(e){}
+  };
 
   const tabs=[
     {id:"ema",label:"📊 EMA COMPRESSION",color:"#00b4d8"},
@@ -861,7 +875,7 @@ export default function App(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:600}}>
           <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1,whiteSpace:"nowrap"}}>WATCHLIST</span>
-          <input value={symbols} onChange={e=>setSymbols(e.target.value)}
+          <input value={symbols} onChange={e=>updateSymbols(e.target.value)}
             style={{flex:1,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
         </div>
       </div>
@@ -869,7 +883,7 @@ export default function App(){
       {/* TABS */}
       <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex"}}>
         {tabs.map(tab=>(
-          <button key={tab.id} onClick={()=>setActiveTab(tab.id)} style={{padding:"10px 20px",fontFamily:"inherit",fontSize:11,fontWeight:700,letterSpacing:1,
+          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{padding:"10px 20px",fontFamily:"inherit",fontSize:11,fontWeight:700,letterSpacing:1,
             background:activeTab===tab.id?"#0d1e30":"transparent",
             borderBottom:activeTab===tab.id?`2px solid ${tab.color}`:"2px solid transparent",
             color:activeTab===tab.id?tab.color:"#3a6e9a",border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap"}}>
