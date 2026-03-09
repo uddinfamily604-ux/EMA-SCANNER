@@ -1346,10 +1346,13 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
     const syms=symbols.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
     setProg({done:0,total:syms.length});
     const all=[],failed=[];
-    for(let i=0;i<syms.length;i++){
-      const r=await analyzeEMA(syms[i],ema1,ema2,ema3,tf,minSlope);
-      if(r)all.push(r);else failed.push(syms[i]);
-      setProg({done:i+1,total:syms.length});
+    // Parallel scan in batches of 10
+    const BATCH=10;
+    for(let b=0;b<syms.length;b+=BATCH){
+      const batch=syms.slice(b,b+BATCH);
+      const results=await Promise.all(batch.map(s=>analyzeEMA(s,ema1,ema2,ema3,tf,minSlope)));
+      results.forEach((r,i)=>{ if(r)all.push(r); else failed.push(batch[i]); });
+      setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
     }
     let filtered=[...all];
     if(filterMode==="BEARISH")filtered=filtered.filter(d=>d.allSlopingDown);
@@ -1537,21 +1540,24 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
     const syms=symbols.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
     setProg({done:0,total:syms.length});
     const all=[],failed=[];
-    for(let i=0;i<syms.length;i++){
-      const sym=syms[i];
-      try {
-        const [r1,r2,r3,r4]=await Promise.all(tfs.map(tf=>analyzeHTOnly(sym,tf)));
-        const price=(r1||r2||r3||r4)?.price||"—";
-        const isSell=direction==="SELL";
-        const htResults=[r1,r2,r3,r4];
-        const matchCount=htResults.filter(r=>r&&(isSell?r.trend===1:r.trend===0)).length;
-        const totalFetched=htResults.filter(Boolean).length;
-        const aligned=totalFetched===4&&matchCount===4;
-        const flipCount=htResults.filter(r=>r&&(isSell?r.sellSignal:r.buySignal)).length;
-        if(totalFetched===0) continue;
-        all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount});
-      } catch(e){failed.push(sym);}
-      setProg({done:i+1,total:syms.length});
+    const BATCH=10;
+    for(let b=0;b<syms.length;b+=BATCH){
+      const batch=syms.slice(b,b+BATCH);
+      await Promise.all(batch.map(async sym=>{
+        try {
+          const [r1,r2,r3,r4]=await Promise.all(tfs.map(tf=>analyzeHTOnly(sym,tf)));
+          const price=(r1||r2||r3||r4)?.price||"—";
+          const isSell=direction==="SELL";
+          const htResults=[r1,r2,r3,r4];
+          const matchCount=htResults.filter(r=>r&&(isSell?r.trend===1:r.trend===0)).length;
+          const totalFetched=htResults.filter(Boolean).length;
+          const aligned=totalFetched===4&&matchCount===4;
+          const flipCount=htResults.filter(r=>r&&(isSell?r.sellSignal:r.buySignal)).length;
+          if(totalFetched===0) return;
+          all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount});
+        } catch(e){failed.push(sym);}
+      }));
+      setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
     }
     all.sort((a,b)=>b.matchCount-a.matchCount||b.flipCount-a.flipCount);
 
@@ -1716,7 +1722,10 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
     const syms=symbols.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
     setProg({done:0,total:syms.length});
     const all=[],failed=[];
-    for(let i=0;i<syms.length;i++){
+    const BATCH=10;
+    for(let b=0;b<syms.length;b+=BATCH){
+      const batch=syms.slice(b,b+BATCH);
+      await Promise.all(batch.map(async sym=>{
       const sym=syms[i];
       try {
         const [r1,r2,r3,r4]=await Promise.all(tfs.map(tf=>analyzeSHAHT(sym,tf)));
@@ -1731,7 +1740,10 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
         if(totalFetched===0) continue;
         all.push({symbol:sym,price,r1,r2,r3,r4,fullyAligned,matchCount,totalFetched,flipCount,shaFlipCount});
       } catch(e){failed.push(sym);}
-      setProg({done:i+1,total:syms.length});
+      
+    }
+      }));
+      setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
     }
     all.sort((a,b)=>b.matchCount-a.matchCount||b.flipCount-a.flipCount||b.shaFlipCount-a.shaFlipCount);
 
