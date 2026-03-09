@@ -339,6 +339,65 @@ async function analyzeHTOnly(symbol, tf) {
   return {...ht, price:c.closes[c.closes.length-1].toFixed(2), candlesAgo:ht.candlesAgo, freshSignal:ht.freshSignal};
 }
 
+// ─── STOCK QUALITY METRICS ────────────────────────────────────────────────────
+// Fetches daily candles and computes: RelVol, ATR%, EMA distance
+async function getStockMetrics(symbol) {
+  try {
+    const now = new Date();
+    const from = new Date(now);
+    from.setDate(from.getDate() - 60); // 60 days of daily data
+    const fromStr = from.toISOString().split("T")[0];
+    const toStr = now.toISOString().split("T")[0];
+    const url = `${BASE_URL}/v2/aggs/ticker/${symbol}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=100&apiKey=${API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(!data.results || data.results.length < 20) return null;
+
+    const bars = data.results;
+    const n = bars.length;
+    const closes = bars.map(b=>b.c);
+    const highs  = bars.map(b=>b.h);
+    const lows   = bars.map(b=>b.l);
+    const vols   = bars.map(b=>b.v);
+
+    // ── Relative Volume (today vs 20-day avg) ──
+    const todayVol = vols[n-1];
+    const avgVol20 = vols.slice(-21,-1).reduce((a,b)=>a+b,0)/20;
+    const relVol = avgVol20>0 ? parseFloat((todayVol/avgVol20).toFixed(2)) : 0;
+
+    // ── ATR% (14-day Average True Range as % of price) ──
+    let atrSum=0;
+    for(let i=n-14;i<n;i++){
+      const tr=Math.max(
+        highs[i]-lows[i],
+        Math.abs(highs[i]-closes[i-1]),
+        Math.abs(lows[i]-closes[i-1])
+      );
+      atrSum+=tr;
+    }
+    const atr14 = atrSum/14;
+    const price = closes[n-1];
+    const atrPct = parseFloat((atr14/price*100).toFixed(2));
+
+    // ── EMA Distance (price vs 20 EMA as %) ──
+    let ema=closes[0];
+    const k=2/21;
+    for(let i=1;i<n;i++) ema=closes[i]*k+ema*(1-k);
+    const emaDist = parseFloat(((price-ema)/ema*100).toFixed(2));
+
+    // ── Score (0-100) ──
+    // RelVol: >2 = 40pts, >1.5 = 25pts, >1 = 10pts
+    // ATR%: >3 = 30pts, >2 = 20pts, >1 = 10pts
+    // AbsEmaDist: >3% = 30pts, >1.5% = 20pts, >0.5% = 10pts
+    const rvScore = relVol>=2?40:relVol>=1.5?25:relVol>=1?10:0;
+    const atrScore = atrPct>=3?30:atrPct>=2?20:atrPct>=1?10:0;
+    const edScore = Math.abs(emaDist)>=3?30:Math.abs(emaDist)>=1.5?20:Math.abs(emaDist)>=0.5?10:0;
+    const score = rvScore+atrScore+edScore;
+
+    return { relVol, atrPct, emaDist, score, price: price.toFixed(2), avgVol20: Math.round(avgVol20) };
+  } catch(e){ return null; }
+}
+
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function SlopeArrow({slope}){
   const deg=slope>0.15?-45:slope>0.05?-25:slope>0?-10:slope>-0.05?10:slope>-0.15?25:45;
@@ -1647,12 +1706,20 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           }
           if(totalFetched===0) return;
           const r4CandlesAgo = r4?.candlesAgo??null;
-          all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount,r4CandlesAgo});
+          // Fetch quality metrics (relVol, ATR%, EMA dist)
+          const metrics = await getStockMetrics(sym);
+          all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount,r4CandlesAgo,metrics});
         } catch(e){failed.push(sym);}
       }));
       setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
     }
-    all.sort((a,b)=>b.matchCount-a.matchCount||b.flipCount-a.flipCount);
+    // Sort: aligned first, then by metrics score, then matchCount
+    all.sort((a,b)=>{
+      if(b.aligned!==a.aligned) return b.aligned-a.aligned;
+      const bScore=(b.metrics?.score||0)+(b.matchCount*10)+(b.flipCount*5);
+      const aScore=(a.metrics?.score||0)+(a.matchCount*10)+(a.flipCount*5);
+      return bScore-aScore;
+    });
 
     // Fire alerts for newly aligned
     const newAligned = all.filter(r=>r.aligned);
@@ -1757,7 +1824,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           {results.length>0&&(
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
-                {["SYMBOL","PRICE",`${tf1.toUpperCase()} BIAS`,`${tf2.toUpperCase()} CONFIRM`,`${tf3.toUpperCase()} ENTRY`,`${tf4.toUpperCase()} FINE`,"MATCH","SIGNAL","TIME"].map(h=>
+                {["SYMBOL","PRICE",`${tf1.toUpperCase()} BIAS`,`${tf2.toUpperCase()} CONFIRM`,`${tf3.toUpperCase()} ENTRY`,`${tf4.toUpperCase()} FINE`,"MATCH","REL VOL","ATR%","EMA DIST","SCORE","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
               </tr></thead>
               <tbody>
@@ -1787,6 +1854,36 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                         border:`1px solid ${r.matchCount===4?(direction==="SELL"?"#ff1744":"#00e676"):"#ff9800"}`}}>
                         {r.matchCount}/{r.totalFetched}
                       </span>
+                    </td>
+                    {/* REL VOL */}
+                    <td style={{padding:"7px 8px",textAlign:"center"}}>
+                      {r.metrics?<span style={{fontSize:10,fontWeight:700,
+                        color:r.metrics.relVol>=2?"#ff1744":r.metrics.relVol>=1.5?"#ff9800":r.metrics.relVol>=1?"#ffeb3b":"#3a6e9a"}}>
+                        {r.metrics.relVol}x
+                      </span>:<span style={{color:"#2a4a6a"}}>—</span>}
+                    </td>
+                    {/* ATR% */}
+                    <td style={{padding:"7px 8px",textAlign:"center"}}>
+                      {r.metrics?<span style={{fontSize:10,fontWeight:700,
+                        color:r.metrics.atrPct>=3?"#00e676":r.metrics.atrPct>=2?"#ffeb3b":"#3a6e9a"}}>
+                        {r.metrics.atrPct}%
+                      </span>:<span style={{color:"#2a4a6a"}}>—</span>}
+                    </td>
+                    {/* EMA DIST */}
+                    <td style={{padding:"7px 8px",textAlign:"center"}}>
+                      {r.metrics?<span style={{fontSize:10,fontWeight:700,
+                        color:r.metrics.emaDist>0?"#ff1744":"#00e676"}}>
+                        {r.metrics.emaDist>0?"+":""}{r.metrics.emaDist}%
+                      </span>:<span style={{color:"#2a4a6a"}}>—</span>}
+                    </td>
+                    {/* SCORE */}
+                    <td style={{padding:"7px 8px",textAlign:"center"}}>
+                      {r.metrics?<span style={{padding:"2px 6px",borderRadius:3,fontSize:10,fontWeight:700,
+                        background:r.metrics.score>=70?"#1a0505":r.metrics.score>=40?"#1a1200":"#0d1b2e",
+                        color:r.metrics.score>=70?"#ff1744":r.metrics.score>=40?"#ffeb3b":"#3a6e9a",
+                        border:`1px solid ${r.metrics.score>=70?"#ff1744":r.metrics.score>=40?"#ff9800":"#1e3a5a"}`}}>
+                        {r.metrics.score}
+                      </span>:<span style={{color:"#2a4a6a"}}>—</span>}
                     </td>
                     <td style={{padding:"7px 8px"}}>
                       {r.aligned?<span style={{padding:"3px 8px",borderRadius:3,fontSize:10,fontWeight:700,
