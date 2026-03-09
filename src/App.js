@@ -989,456 +989,171 @@ function BondoFund() {
 function ChartTab({trades, initialSym}) {
   const [chartSym, setChartSym] = useState(initialSym||"SPY");
   const [inputSym, setInputSym] = useState(initialSym||"SPY");
-  const [tf, setTf] = useState({label:"15m",mult:15,span:"minute"});
-  const [candles, setCandles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [tf, setTf] = useState("60");
   const [selectedTrade, setSelectedTrade] = useState(null);
-  const [livePrice, setLivePrice] = useState(null);
-  const [macdData, setMacdData] = useState([]);
-  const [rsiData, setRsiData] = useState([]);
-  const [htData, setHtData] = useState({markers:[],htLine:[],atrHighLine:[],atrLowLine:[]});
-
-  const chartContainerRef = useRef(null);
-  const lwChartRef = useRef(null);
-  const candleSeriesRef = useRef(null);
-  const volSeriesRef = useRef(null);
-  const ema50Ref = useRef(null);
-  const ema100Ref = useRef(null);
-  const ema200Ref = useRef(null);
-  const htLineRef = useRef(null);
-  const htLineDnRef = useRef(null);
-  const htAtrHighRef = useRef(null);
-  const htAtrLowRef = useRef(null);
-  const macdCanvasRef = useRef(null);
-  const rsiCanvasRef = useRef(null);
-  const autoTimerRef = useRef(null);
+  const [widgetKey, setWidgetKey] = useState(0);
+  const containerRef = useRef(null);
+  const widgetRef = useRef(null);
 
   const closedTrades = trades.filter(t=>t.pnl!==null);
-  const openTrades = trades.filter(t=>t.pnl===null);
+  const openTrades   = trades.filter(t=>t.pnl===null);
 
   const TF_OPTIONS = [
-    {label:"1m",  mult:1,  span:"minute"},
-    {label:"2m",  mult:2,  span:"minute"},
-    {label:"3m",  mult:3,  span:"minute"},
-    {label:"5m",  mult:5,  span:"minute"},
-    {label:"15m", mult:15, span:"minute"},
-    {label:"30m", mult:30, span:"minute"},
-    {label:"1H",  mult:1,  span:"hour"},
-    {label:"4H",  mult:4,  span:"hour"},
-    {label:"1D",  mult:1,  span:"day"},
+    {label:"1m",  val:"1"},
+    {label:"2m",  val:"2"},
+    {label:"3m",  val:"3"},
+    {label:"5m",  val:"5"},
+    {label:"15m", val:"15"},
+    {label:"30m", val:"30"},
+    {label:"1H",  val:"60"},
+    {label:"4H",  val:"240"},
+    {label:"1D",  val:"D"},
+    {label:"1W",  val:"W"},
   ];
 
-  const calcEMA = (data, period) => {
-    const k=2/(period+1); let ema=data[0]?.close||0;
-    return data.map((d,i)=>{ ema=i===0?d.close:d.close*k+ema*(1-k); return {time:d.time,value:parseFloat(ema.toFixed(4))}; });
+  const loadChart = (sym, interval) => {
+    setChartSym(sym);
+    setInputSym(sym);
+    if(interval) setTf(interval);
+    setWidgetKey(k=>k+1); // force re-render of widget
   };
 
-  // ── HalfTrend — exact port of Alex Orekhov Pine Script v4 ──
-  // amplitude=2, channelDeviation=2, atr(100)/2
-  const calcHalfTrend = (data, amplitude=2, channelDeviation=2) => {
-    const n = data.length;
-    if(n < 2) return {markers:[], htLine:[], atrHighLine:[], atrLowLine:[]};
-
-    // ATR(100) using Wilder's RMA
-    const trArr = data.map((d,i)=> i===0 ? d.high-d.low :
-      Math.max(d.high-d.low, Math.abs(d.high-data[i-1].close), Math.abs(d.low-data[i-1].close)));
-    const atrArr = [];
-    let rmaVal = trArr.slice(0,100).reduce((a,b)=>a+b,0)/Math.min(100,trArr.length);
-    for(let i=0;i<n;i++){
-      if(i<100){ atrArr.push(trArr.slice(0,i+1).reduce((a,b)=>a+b,0)/(i+1)); }
-      else { rmaVal=(rmaVal*99+trArr[i])/100; atrArr.push(rmaVal); }
-    }
-
-    // SMA of high/low over amplitude
-    const smaHigh = (i) => { let s=0,c=0; for(let j=Math.max(0,i-amplitude+1);j<=i;j++){s+=data[j].high;c++;} return s/c; };
-    const smaLow  = (i) => { let s=0,c=0; for(let j=Math.max(0,i-amplitude+1);j<=i;j++){s+=data[j].low;c++;}  return s/c; };
-
-    // Highest high / lowest low over amplitude bars
-    const highestHigh = (i) => { let m=-Infinity; for(let j=Math.max(0,i-amplitude+1);j<=i;j++) m=Math.max(m,data[j].high); return m; };
-    const lowestLow   = (i) => { let m= Infinity; for(let j=Math.max(0,i-amplitude+1);j<=i;j++) m=Math.min(m,data[j].low);  return m; };
-
-    let trend=0, nextTrend=0;
-    let maxLowPrice = data[0].low;
-    let minHighPrice = data[0].high;
-    let up=0, down=0;
-
-    const markers=[], htLine=[], atrHighLine=[], atrLowLine=[];
-
-    for(let i=0;i<n;i++){
-      const atr2 = atrArr[i]/2;
-      const dev  = channelDeviation * atr2;
-      const highPrice = highestHigh(i);
-      const lowPrice  = lowestLow(i);
-      const highma    = smaHigh(i);
-      const lowma     = smaLow(i);
-      const prevClose = i>0 ? data[i-1].close : data[i].close;
-      const prevLow   = i>0 ? data[i-1].low   : data[i].low;
-      const prevHigh  = i>0 ? data[i-1].high  : data[i].high;
-
-      if(nextTrend===1){
-        maxLowPrice = Math.max(lowPrice, maxLowPrice);
-        if(highma < maxLowPrice && data[i].close < prevLow){
-          trend=1; nextTrend=0; minHighPrice=highPrice;
-        }
-      } else {
-        minHighPrice = Math.min(highPrice, minHighPrice);
-        if(lowma > minHighPrice && data[i].close > prevHigh){
-          trend=0; nextTrend=1; maxLowPrice=lowPrice;
-        }
-      }
-
-      const prevTrend = i>0 ? htLine[i-1]?.trend : 0;
-      let arrowUp=null, arrowDown=null;
-
-      if(trend===0){
-        if(prevTrend!==undefined && prevTrend===1){
-          // just flipped to uptrend
-          up = (down || 0);
-          arrowUp = up - atr2;
-        } else {
-          up = Math.max(maxLowPrice, up||maxLowPrice);
-        }
-        const atrHigh = up + dev;
-        const atrLow  = up - dev;
-        htLine.push({time:data[i].time, value:parseFloat(up.toFixed(4)), trend:0});
-        atrHighLine.push({time:data[i].time, value:parseFloat(atrHigh.toFixed(4))});
-        atrLowLine.push({time:data[i].time,  value:parseFloat(atrLow.toFixed(4))});
-        if(arrowUp!==null){
-          markers.push({time:data[i].time, position:"belowBar", color:"#2962FF", shape:"arrowUp", size:1.5, text:"BUY"});
-        }
-      } else {
-        if(prevTrend!==undefined && prevTrend===0){
-          // just flipped to downtrend
-          down = (up || 0);
-          arrowDown = down + atr2;
-        } else {
-          down = Math.min(minHighPrice, down||minHighPrice);
-        }
-        const atrHigh = down + dev;
-        const atrLow  = down - dev;
-        htLine.push({time:data[i].time, value:parseFloat(down.toFixed(4)), trend:1});
-        atrHighLine.push({time:data[i].time, value:parseFloat(atrHigh.toFixed(4))});
-        atrLowLine.push({time:data[i].time,  value:parseFloat(atrLow.toFixed(4))});
-        if(arrowDown!==null){
-          markers.push({time:data[i].time, position:"aboveBar", color:"#B71D1C", shape:"arrowDown", size:1.5, text:"SELL"});
-        }
-      }
-    }
-    return {markers, htLine, atrHighLine, atrLowLine};
+  const reviewTrade = (t) => {
+    setSelectedTrade(t);
+    loadChart(t.symbol);
   };
 
-  // ── MACD — exact port of CM_MacD_Ult_MTF_V2.1 Pine Script v5 ──
-  // fast=12, slow=26, signal=9, all EMA
-  const calcMACD = (data) => {
-    const ema = (arr, period) => {
-      const k=2/(period+1); let e=arr[0];
-      return arr.map((v,i)=>{ e=i===0?v:v*k+e*(1-k); return e; });
-    };
-    const closes = data.map(d=>d.close);
-    const fast   = ema(closes, 12);
-    const slow   = ema(closes, 26);
-    const macdArr = fast.map((f,i)=>f-slow[i]);
-    const sigArr  = ema(macdArr, 9);
-
-    return data.map((d,i)=>{
-      const macd = macdArr[i], signal = sigArr[i], hist = macd-signal;
-      const prevHist = i>0 ? macdArr[i-1]-sigArr[i-1] : hist;
-      // Histogram colors — exact match to Pine Script
-      const histColor =
-        hist>0 && hist>prevHist ? "#26A69A" :  // above, growing (teal)
-        hist>0 && hist<=prevHist ? "#B2DFDB" : // above, falling (light teal)
-        hist<=0 && hist<prevHist ? "#FF5252" : // below, growing down (red)
-        "#FFCDD2";                              // below, falling up (light red)
-      // Cross signals
-      const prevMacd = macdArr[i-1]||macd, prevSig = sigArr[i-1]||signal;
-      const crossUp = prevSig >= prevMacd && signal < macd;
-      const crossDn = prevSig <= prevMacd && signal > macd;
-      return {
-        time:d.time,
-        macd:parseFloat(macd.toFixed(4)),
-        signal:parseFloat(signal.toFixed(4)),
-        hist:parseFloat(hist.toFixed(4)),
-        histColor, crossUp, crossDn,
-        trendUp: macd>signal
-      };
-    });
-  };
-
-  // ── RSI — exact port of TradingView built-in Pine Script v5 ──
-  // Uses ta.rma (Wilder's Smoothing), period=14
-  const calcRSI = (data, period=14) => {
-    if(data.length < period+1) return [];
-    const res=[];
-    // Seed: SMA of first `period` gains/losses
-    let upRma=0, downRma=0;
-    for(let i=1;i<=period;i++){
-      const chg=data[i].close-data[i-1].close;
-      upRma   += Math.max(chg,0);
-      downRma += Math.max(-chg,0);
-    }
-    upRma/=period; downRma/=period;
-    const rsiVal=(u,d)=> d===0?100:u===0?0:parseFloat((100-100/(1+u/d)).toFixed(2));
-    res.push({time:data[period].time, value:rsiVal(upRma,downRma)});
-    // Wilder RMA for rest
-    for(let i=period+1;i<data.length;i++){
-      const chg=data[i].close-data[i-1].close;
-      upRma   =(upRma  *(period-1)+Math.max(chg, 0))/period;
-      downRma =(downRma*(period-1)+Math.max(-chg,0))/period;
-      res.push({time:data[i].time, value:rsiVal(upRma,downRma)});
-    }
-    return res;
-  };
-
-  const fetchCandles = async (sym, timeframe) => {
-    setLoading(true); setError("");
-    try {
-      const now=new Date();
-      const daysBack=timeframe.span==="day"?365:timeframe.span==="hour"?30:5;
-      const from=new Date(now-daysBack*86400000).toISOString().split("T")[0];
-      const to=now.toISOString().split("T")[0];
-      const url=`https://api.polygon.io/v2/aggs/ticker/${sym}/range/${timeframe.mult}/${timeframe.span}/${from}/${to}?adjusted=true&sort=asc&limit=5000&apiKey=${API_KEY}`;
-      const res=await fetch(url);
-      const json=await res.json();
-      if(!json.results||json.results.length===0){ setError(`No data for ${sym}`); setLoading(false); return; }
-      const data=json.results.map(r=>({
-        time:Math.floor(r.t/1000),
-        open:r.o, high:r.h, low:r.l, close:r.c, volume:r.v
-      }));
-      setCandles(data);
-      setLivePrice(data[data.length-1].close);
-      const macd=calcMACD(data); setMacdData(macd);
-      const rsi=calcRSI(data); setRsiData(rsi);
-      const ht=calcHalfTrend(data); setHtData(ht);
-      updateLWChart(data, ht, sym);
-    } catch(e){ setError("Fetch error: "+e.message); }
-    setLoading(false);
-  };
-
-  const updateLWChart = (data, ht, sym) => {
-    if(!lwChartRef.current) return;
-    const chart=lwChartRef.current;
-    candleSeriesRef.current.setData(data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close})));
-    volSeriesRef.current.setData(data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?"rgba(0,230,118,0.4)":"rgba(255,23,68,0.4)"})));
-    ema50Ref.current.setData(calcEMA(data,50));
-    ema100Ref.current.setData(calcEMA(data,100));
-    ema200Ref.current.setData(calcEMA(data,200));
-    // HalfTrend line (blue=up, red=down) colored per bar
-    if(ht.htLine.length>0){
-      // Split into up/down colored segments
-      const upSeg=ht.htLine.map(p=>({time:p.time,value:p.value,color:p.trend===0?"#2962FF":"transparent"}));
-      const dnSeg=ht.htLine.map(p=>({time:p.time,value:p.value,color:p.trend===1?"#B71D1C":"transparent"}));
-      htLineRef.current.setData(upSeg);
-      htLineDnRef.current.setData(dnSeg);
-    }
-    // ATR channel bands
-    if(ht.atrHighLine.length>0){ htAtrHighRef.current.setData(ht.atrHighLine); htAtrLowRef.current.setData(ht.atrLowLine); }
-    // Buy/Sell markers — only on trend flip
-    candleSeriesRef.current.setMarkers(ht.markers);
-    chart.timeScale().fitContent();
-  };
-
-  // Draw entry/exit lines on chart
-  const drawTradeLevels = (trade) => {
-    if(!candleSeriesRef.current||!lwChartRef.current) return;
-    const chart=lwChartRef.current;
-    // Remove old price lines
-    try{ if(chart._entryLine) candleSeriesRef.current.removePriceLine(chart._entryLine); } catch(e){}
-    try{ if(chart._exitLine) candleSeriesRef.current.removePriceLine(chart._exitLine); } catch(e){}
-    if(!trade){ return; }
-    chart._entryLine=candleSeriesRef.current.createPriceLine({price:trade.entry,color:"#ffeb3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`ENTRY $${trade.entry}`});
-    if(trade.exit) chart._exitLine=candleSeriesRef.current.createPriceLine({price:trade.exit,color:"#00e676",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`EXIT $${trade.exit}`});
-  };
-
-  // Draw MACD canvas
-  // drawMACD — uses exact Pine Script histogram colors from CM_MacD_Ult_MTF_V2.1
-  const drawMACD = () => {
-    const canvas=macdCanvasRef.current; if(!canvas||macdData.length===0) return;
-    const ctx=canvas.getContext("2d"); const W=canvas.width,H=canvas.height;
-    ctx.clearRect(0,0,W,H);
-    ctx.fillStyle="#080e1a"; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("MACD(12,26,9)",6,12);
-    const visible=macdData.slice(-120);
-    if(visible.length===0) return;
-    const hists=visible.map(d=>d.hist);
-    const maxH=Math.max(...hists.map(Math.abs))||1;
-    const midY=H/2; const barW=Math.max(1,(W-20)/visible.length);
-    // Histogram with exact Pine Script colors
-    visible.forEach((d,i)=>{
-      const h=(d.hist/maxH)*(midY-15);
-      ctx.fillStyle=d.histColor||"#888";
-      ctx.fillRect(20+i*barW, h>=0?midY-h:midY, Math.max(1,barW-1), Math.abs(h)||1);
-    });
-    // MACD line — orange (#FF6D00), Signal line — blue (#2962FF) matching Pine
-    const drawLine=(arr,color,key)=>{
-      ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.beginPath();
-      arr.forEach((d,i)=>{ const x=20+i*barW+barW/2; const y=midY-(d[key]/maxH)*(midY-15); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-      ctx.stroke();
-    };
-    drawLine(visible,"#FF6D00","macd");
-    drawLine(visible,"#2962FF","signal");
-    // Cross dots
-    visible.forEach((d,i)=>{
-      if(d.crossUp||d.crossDn){
-        const x=20+i*barW+barW/2; const y=midY-(d.macd/maxH)*(midY-15);
-        ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2);
-        ctx.fillStyle=d.crossUp?"#4BAF4F":"#B71D1C"; ctx.fill();
-      }
-    });
-    // Zero line
-    ctx.strokeStyle="#1e3a5a"; ctx.lineWidth=1; ctx.setLineDash([3,3]);
-    ctx.beginPath(); ctx.moveTo(20,midY); ctx.lineTo(W,midY); ctx.stroke(); ctx.setLineDash([]);
-    // Values
-    const last=visible[visible.length-1];
-    ctx.fillStyle=last.trendUp?"#4BAF4F":"#B71D1C"; ctx.font="9px monospace";
-    ctx.fillText(`MACD:${last.macd.toFixed(3)}`,W-140,12);
-    ctx.fillStyle="#2962FF"; ctx.fillText(`SIG:${last.signal.toFixed(3)}`,W-140,22);
-    ctx.fillStyle=last.hist>=0?"#26A69A":"#FF5252"; ctx.fillText(`HIST:${last.hist.toFixed(3)}`,W-140,32);
-  };
-
-  // Draw RSI canvas
-  const drawRSI = () => {
-    const canvas=rsiCanvasRef.current; if(!canvas||rsiData.length===0) return;
-    const ctx=canvas.getContext("2d"); const W=canvas.width,H=canvas.height;
-    ctx.clearRect(0,0,W,H);
-    ctx.fillStyle="#080e1a"; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("RSI(14)",6,12);
-    const visible=rsiData.slice(-120);
-    if(visible.length===0) return;
-    const toY=v=>H-4-((v/100)*(H-8));
-    const barW=(W-20)/visible.length;
-    // OB/OS zones
-    ctx.fillStyle="rgba(255,23,68,0.07)"; ctx.fillRect(20,toY(70),W-20,toY(30)-toY(70));
-    // Lines at 70/30/50
-    [[70,"#ff174440"],[50,"#1e3a5a"],[30,"#00e67640"]].forEach(([v,c])=>{
-      ctx.strokeStyle=c; ctx.lineWidth=1; ctx.setLineDash([3,3]);
-      ctx.beginPath(); ctx.moveTo(20,toY(v)); ctx.lineTo(W,toY(v)); ctx.stroke();
-    });
-    ctx.setLineDash([]);
-    // RSI line
-    ctx.strokeStyle="#e040fb"; ctx.lineWidth=1.5; ctx.beginPath();
-    visible.forEach((d,i)=>{ const x=20+i*barW+barW/2; const y=toY(d.value); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-    ctx.stroke();
-    // Labels
-    ctx.fillStyle="#ff1744"; ctx.font="8px monospace"; ctx.fillText("70",2,toY(70)+4);
-    ctx.fillStyle="#3a6e9a"; ctx.fillText("50",2,toY(50)+4);
-    ctx.fillStyle="#00e676"; ctx.fillText("30",2,toY(30)+4);
-    const last=rsiData[rsiData.length-1];
-    if(last){ const col=last.value>70?"#ff1744":last.value<30?"#00e676":"#e040fb"; ctx.fillStyle=col; ctx.font="bold 10px monospace"; ctx.fillText(last.value.toFixed(1),W-32,12); }
-  };
-
-  // Init Lightweight Charts
+  // Build TradingView widget whenever sym/tf/key changes
   useEffect(()=>{
-    if(!chartContainerRef.current) return;
-    const script=document.createElement("script");
-    script.src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
-    script.onload=()=>{
-      if(lwChartRef.current) return;
-      const chart=window.LightweightCharts.createChart(chartContainerRef.current,{
-        width:chartContainerRef.current.clientWidth,
-        height:chartContainerRef.current.clientHeight,
-        layout:{background:{color:"#080e1a"},textColor:"#8ab4cc"},
-        grid:{vertLines:{color:"#0d1b2e"},horzLines:{color:"#0d1b2e"}},
-        crosshair:{mode:1},
-        rightPriceScale:{borderColor:"#1e3a5a"},
-        timeScale:{borderColor:"#1e3a5a",timeVisible:true,secondsVisible:false},
+    if(!containerRef.current) return;
+    // Clear previous widget
+    containerRef.current.innerHTML = "";
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = () => {
+      if(!containerRef.current) return;
+      widgetRef.current = new window.TradingView.widget({
+        autosize: true,
+        symbol: chartSym,
+        interval: tf,
+        timezone: "America/New_York",
+        theme: "dark",
+        style: "1",           // candlestick
+        locale: "en",
+        toolbar_bg: "#0d1b2e",
+        enable_publishing: false,
+        hide_side_toolbar: false,
+        allow_symbol_change: true,
+        watchlist: ["SPY","QQQ","VIX","AAPL","TSLA","AMZN","NVDA","MSFT"],
+        details: true,
+        hotlist: false,
+        calendar: false,
+        show_popup_button: true,
+        popup_width: "1000",
+        popup_height: "650",
+        // YOUR TradingView account — loads your saved indicators & layouts
+        username: "alan12",
+        withdateranges: true,
+        save_image: true,
+        studies: [
+          "MASimple@tv-basicstudies",   // EMA
+          "MACD@tv-basicstudies",
+          "RSI@tv-basicstudies",
+        ],
+        container_id: "tv_chart_container",
       });
-      lwChartRef.current=chart;
-      candleSeriesRef.current=chart.addCandlestickSeries({upColor:"#00e676",downColor:"#ff1744",borderUpColor:"#00e676",borderDownColor:"#ff1744",wickUpColor:"#00e676",wickDownColor:"#ff1744"});
-      volSeriesRef.current=chart.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:"vol",scaleMargins:{top:0.85,bottom:0}});
-      ema50Ref.current=chart.addLineSeries({color:"#00b4d8",lineWidth:1,title:"EMA50"});
-      ema100Ref.current=chart.addLineSeries({color:"#ff9800",lineWidth:1,title:"EMA100"});
-      ema200Ref.current=chart.addLineSeries({color:"#e040fb",lineWidth:1,title:"EMA200"});
-      // HalfTrend line series
-      htLineRef.current=chart.addLineSeries({color:"#2962FF",lineWidth:2,title:"HT",lastValueVisible:false,priceLineVisible:false});
-      htLineDnRef.current=chart.addLineSeries({color:"#B71D1C",lineWidth:2,title:"",lastValueVisible:false,priceLineVisible:false});
-      htAtrHighRef.current=chart.addLineSeries({color:"rgba(183,29,28,0.3)",lineWidth:1,lineStyle:3,lastValueVisible:false,priceLineVisible:false});
-      htAtrLowRef.current=chart.addLineSeries({color:"rgba(41,98,255,0.3)",lineWidth:1,lineStyle:3,lastValueVisible:false,priceLineVisible:false});
-      const ro=new ResizeObserver(entries=>{ for(const e of entries) chart.resize(e.contentRect.width,e.contentRect.height); });
-      ro.observe(chartContainerRef.current);
-      fetchCandles(chartSym,tf);
     };
-    document.head.appendChild(script);
-    return ()=>{ if(lwChartRef.current){ lwChartRef.current.remove(); lwChartRef.current=null; } };
-  },[]);
 
-  // Redraw indicator canvases when data changes
-  useEffect(()=>{ drawMACD(); },[macdData]);
-  useEffect(()=>{ drawRSI(); },[rsiData]);
+    // If tv.js already loaded, just create widget
+    if(window.TradingView) {
+      script.onload();
+    } else {
+      document.head.appendChild(script);
+    }
 
-  // When selectedTrade changes, draw lines
-  useEffect(()=>{ drawTradeLevels(selectedTrade); },[selectedTrade,candles]);
+    return () => { containerRef.current && (containerRef.current.innerHTML=""); };
+  }, [chartSym, tf, widgetKey]);
 
-  // Reload chart when symbol or timeframe changes (after init)
-  useEffect(()=>{
-    if(lwChartRef.current) fetchCandles(chartSym,tf);
-  },[chartSym,tf]);
-
-  // Auto-refresh every 60s
-  useEffect(()=>{
-    if(autoTimerRef.current) clearInterval(autoTimerRef.current);
-    autoTimerRef.current=setInterval(()=>{ if(lwChartRef.current) fetchCandles(chartSym,tf); },60000);
-    return ()=>clearInterval(autoTimerRef.current);
-  },[chartSym,tf]);
-
-  const reviewTrade=(t)=>{ setSelectedTrade(t); setChartSym(t.symbol); setInputSym(t.symbol); };
-  const pnlColor=(pnl)=>pnl===null?"#ffeb3b":parseFloat(pnl)>=0?"#00e676":"#ff1744";
-  const dirColor=(d)=>["BUY","BUY CALL","SELL PUT","COVER"].includes(d)?"#00e676":"#ff1744";
+  const pnlColor = (pnl) => pnl===null?"#ffeb3b":parseFloat(pnl)>=0?"#00e676":"#ff1744";
+  const dirColor = (d) => ["BUY","BUY CALL","SELL PUT","COVER"].includes(d)?"#00e676":"#ff1744";
 
   return (
     <div style={{flex:1,display:"flex",flexDirection:"column",background:"#080e1a",overflow:"hidden"}}>
+
       {/* TOP CONTROLS */}
       <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"8px 14px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",flexShrink:0}}>
+        {/* Symbol */}
         <input value={inputSym} onChange={e=>setInputSym(e.target.value.toUpperCase())}
-          onKeyDown={e=>e.key==="Enter"&&setChartSym(inputSym)}
+          onKeyDown={e=>e.key==="Enter"&&loadChart(inputSym)}
           style={{width:90,background:"#0d1b2e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",
             padding:"6px 8px",fontSize:14,fontFamily:"inherit",outline:"none",fontWeight:700,textAlign:"center"}}/>
-        <button onClick={()=>setChartSym(inputSym)} style={{padding:"6px 12px",background:"#0d3b5e",border:"1px solid #00b4d8",
+        <button onClick={()=>loadChart(inputSym)}
+          style={{padding:"6px 12px",background:"#0d3b5e",border:"1px solid #00b4d8",
           borderRadius:4,color:"#00b4d8",fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>
           LOAD ↵
         </button>
+
         <div style={{width:1,height:20,background:"#1e3a5a"}}/>
+
+        {/* Timeframes */}
         {TF_OPTIONS.map(t=>(
-          <button key={t.label} onClick={()=>setTf(t)} style={{padding:"4px 8px",
-            background:tf.label===t.label?"#0d3b5e":"transparent",
-            border:`1px solid ${tf.label===t.label?"#00b4d8":"#1e3a5a"}`,
-            color:tf.label===t.label?"#00b4d8":"#3a6e9a",
-            borderRadius:3,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:tf.label===t.label?700:400}}>
+          <button key={t.val} onClick={()=>{ setTf(t.val); setWidgetKey(k=>k+1); }}
+            style={{padding:"4px 8px",
+              background:tf===t.val?"#0d3b5e":"transparent",
+              border:`1px solid ${tf===t.val?"#00b4d8":"#1e3a5a"}`,
+              color:tf===t.val?"#00b4d8":"#3a6e9a",
+              borderRadius:3,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:tf===t.val?700:400}}>
             {t.label}
           </button>
         ))}
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
-          {loading&&<span style={{fontSize:10,color:"#ff9800"}}>⟳ Loading...</span>}
-          {error&&<span style={{fontSize:10,color:"#ff1744"}}>⚠ {error}</span>}
-          {livePrice&&!loading&&<span style={{fontSize:16,fontWeight:700,color:"#e8f4ff"}}>{chartSym} <span style={{color:"#00e676"}}>${livePrice.toFixed(2)}</span></span>}
+
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:16,fontWeight:700,color:"#e8f4ff"}}>{chartSym}</span>
+          <span style={{fontSize:9,color:"#00e676",padding:"2px 6px",border:"1px solid #00e676",borderRadius:3}}>alan12 ✓</span>
         </div>
       </div>
 
       {/* MAIN AREA */}
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-        {/* CHART COLUMN */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
-          {/* Main candlestick chart */}
-          <div ref={chartContainerRef} style={{flex:1,minHeight:0}}/>
-          {/* MACD Panel */}
-          <div style={{height:80,flexShrink:0,borderTop:"1px solid #1e3a5a",position:"relative"}}>
-            <canvas ref={macdCanvasRef} width={800} height={80} style={{width:"100%",height:"100%"}}/>
-          </div>
-          {/* RSI Panel */}
-          <div style={{height:70,flexShrink:0,borderTop:"1px solid #1e3a5a",position:"relative"}}>
-            <canvas ref={rsiCanvasRef} width={800} height={70} style={{width:"100%",height:"100%"}}/>
-          </div>
+
+        {/* TRADINGVIEW CHART — YOUR ACCOUNT */}
+        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+          <div
+            id="tv_chart_container"
+            ref={containerRef}
+            key={widgetKey}
+            style={{width:"100%",height:"100%"}}
+          />
+          {/* Entry/Exit overlay labels */}
+          {selectedTrade&&(
+            <div style={{position:"absolute",top:10,left:10,zIndex:10,display:"flex",flexDirection:"column",gap:4,pointerEvents:"none"}}>
+              <div style={{padding:"4px 10px",background:"rgba(8,14,26,0.9)",border:"1px solid #ffeb3b",borderRadius:4,fontSize:11,color:"#ffeb3b",fontWeight:700}}>
+                ── ENTRY ${selectedTrade.entry}
+              </div>
+              {selectedTrade.exit&&(
+                <div style={{padding:"4px 10px",background:"rgba(8,14,26,0.9)",border:"1px solid #00e676",borderRadius:4,fontSize:11,color:"#00e676",fontWeight:700}}>
+                  ── EXIT ${selectedTrade.exit}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* RIGHT PANEL */}
+        {/* RIGHT PANEL — Trade Review */}
         <div style={{width:250,minWidth:250,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          {/* Selected trade */}
+
+          {/* Selected trade detail */}
           {selectedTrade&&(
-            <div style={{padding:"10px",borderBottom:"1px solid #1e3a5a",flexShrink:0}}>
+            <div style={{padding:"10px",borderBottom:"1px solid #1e3a5a",flexShrink:0,overflowY:"auto",maxHeight:"60%"}}>
               <div style={{fontSize:9,color:"#ff9800",fontWeight:700,letterSpacing:1,marginBottom:6}}>🔍 REVIEWING: {selectedTrade.symbol}</div>
-              <div style={{display:"flex",gap:6,marginBottom:8}}>
+              <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
                 <span style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{selectedTrade.symbol}</span>
-                <span style={{fontSize:9,fontWeight:700,color:dirColor(selectedTrade.direction),padding:"2px 5px",border:`1px solid ${dirColor(selectedTrade.direction)}`,borderRadius:3}}>{selectedTrade.direction}</span>
+                <span style={{fontSize:9,fontWeight:700,color:dirColor(selectedTrade.direction),
+                  padding:"2px 5px",border:`1px solid ${dirColor(selectedTrade.direction)}`,borderRadius:3}}>
+                  {selectedTrade.direction}
+                </span>
               </div>
               {/* Price levels */}
               <div style={{background:"#0d1b2e",borderRadius:5,padding:"8px",marginBottom:6}}>
@@ -1452,10 +1167,11 @@ function ChartTab({trades, initialSym}) {
                     <span style={{fontSize:13,fontWeight:700,color:"#00e676"}}>${selectedTrade.exit}</span>
                   </div>
                 )}
-                {!selectedTrade.exit&&<div style={{fontSize:9,color:"#ffeb3b",textAlign:"center",marginTop:4}}>⚡ POSITION OPEN</div>}
+                {!selectedTrade.exit&&<div style={{fontSize:9,color:"#ffeb3b",textAlign:"center",marginTop:4}}>⚡ OPEN</div>}
               </div>
               {/* P&L */}
-              <div style={{padding:"8px",background:selectedTrade.pnl>=0?"#051a05":"#1a0505",border:`1px solid ${pnlColor(selectedTrade.pnl)}`,borderRadius:5,marginBottom:6,textAlign:"center"}}>
+              <div style={{padding:"8px",background:selectedTrade.pnl>=0?"#051a05":"#1a0505",
+                border:`1px solid ${pnlColor(selectedTrade.pnl)}`,borderRadius:5,marginBottom:6,textAlign:"center"}}>
                 <div style={{fontSize:18,fontWeight:700,color:pnlColor(selectedTrade.pnl)}}>
                   {selectedTrade.pnl!==null?`${parseFloat(selectedTrade.pnl)>=0?"+":""}$${parseFloat(selectedTrade.pnl).toFixed(2)}`:"OPEN"}
                 </div>
@@ -1469,13 +1185,14 @@ function ChartTab({trades, initialSym}) {
                   const val=(selectedTrade.checks||{})[key];
                   const mk=(v)=>{
                     const updated=trades.map(t=>t.id===selectedTrade.id?{...t,checks:{...(t.checks||{}),[key]:v}}:t);
-                    saveBondoFund(updated); setSelectedTrade(prev=>({...prev,checks:{...(prev.checks||{}),[key]:v}}));
+                    saveBondoFund(updated);
+                    setSelectedTrade(prev=>({...prev,checks:{...(prev.checks||{}),[key]:v}}));
                   };
                   return (
                     <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                       <span style={{fontSize:9,color:"#8ab4cc"}}>{label}</span>
                       <div style={{display:"flex",gap:3}}>
-                        <button onClick={()=>mk(true)} style={{padding:"2px 7px",background:val===true?"#0a2a0a":"#0d1b2e",border:`1px solid ${val===true?"#00e676":"#1e3a5a"}`,borderRadius:3,color:val===true?"#00e676":"#3a6e9a",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>✓</button>
+                        <button onClick={()=>mk(true)}  style={{padding:"2px 7px",background:val===true?"#0a2a0a":"#0d1b2e",border:`1px solid ${val===true?"#00e676":"#1e3a5a"}`,borderRadius:3,color:val===true?"#00e676":"#3a6e9a",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>✓</button>
                         <button onClick={()=>mk(false)} style={{padding:"2px 7px",background:val===false?"#2a0a0a":"#0d1b2e",border:`1px solid ${val===false?"#ff1744":"#1e3a5a"}`,borderRadius:3,color:val===false?"#ff1744":"#3a6e9a",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>✗</button>
                       </div>
                     </div>
@@ -1486,27 +1203,42 @@ function ChartTab({trades, initialSym}) {
                   const tot=Object.values(selectedTrade.checks).length;
                   const score=tot>0?Math.round(yes/tot*100):0;
                   const col=score>=80?"#00e676":score>=60?"#ff9800":"#ff1744";
-                  return(<div style={{marginTop:6,textAlign:"center"}}>
-                    <span style={{fontSize:14,fontWeight:700,color:col}}>{score}%</span>
-                    <span style={{fontSize:9,color:"#3a6e9a"}}> setup quality</span>
-                    <div style={{background:"#080e1a",borderRadius:3,height:4,marginTop:4,overflow:"hidden"}}><div style={{width:`${score}%`,height:"100%",background:col,transition:"width 0.5s"}}/></div>
-                  </div>);
+                  return(
+                    <div style={{marginTop:6,textAlign:"center"}}>
+                      <span style={{fontSize:14,fontWeight:700,color:col}}>{score}%</span>
+                      <span style={{fontSize:9,color:"#3a6e9a"}}> setup quality</span>
+                      <div style={{background:"#080e1a",borderRadius:3,height:4,marginTop:4,overflow:"hidden"}}>
+                        <div style={{width:`${score}%`,height:"100%",background:col,transition:"width 0.5s"}}/>
+                      </div>
+                    </div>
+                  );
                 })()}
               </div>
-              <button onClick={()=>setSelectedTrade(null)} style={{width:"100%",padding:"4px",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#3a6e9a",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>✕ Close</button>
+              <button onClick={()=>setSelectedTrade(null)}
+                style={{width:"100%",padding:"4px",background:"#0d1b2e",border:"1px solid #1e3a5a",
+                borderRadius:3,color:"#3a6e9a",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>
+                ✕ Close Review
+              </button>
             </div>
           )}
 
           {/* Trade list */}
           <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
-            <div style={{fontSize:9,color:"#3a6e9a",fontWeight:700,letterSpacing:1,marginBottom:6}}>📋 CLICK TO REVIEW ON CHART</div>
-            {trades.length===0&&<div style={{textAlign:"center",padding:"20px",color:"#2a5a7a",fontSize:10}}>No trades yet.<br/>Log trades in 🏦 BONDO FUND.</div>}
-            {openTrades.length>0&&<div style={{fontSize:8,color:"#ffeb3b",letterSpacing:1,marginBottom:4}}>⚡ OPEN POSITIONS</div>}
+            <div style={{fontSize:9,color:"#3a6e9a",fontWeight:700,letterSpacing:1,marginBottom:6}}>
+              📋 CLICK TRADE TO REVIEW
+            </div>
+            {trades.length===0&&(
+              <div style={{textAlign:"center",padding:"20px",color:"#2a5a7a",fontSize:10}}>
+                No trades yet.<br/>Log in 🏦 BONDO FUND.
+              </div>
+            )}
+            {openTrades.length>0&&<div style={{fontSize:8,color:"#ffeb3b",letterSpacing:1,marginBottom:4}}>⚡ OPEN</div>}
             {openTrades.map(t=>(
-              <div key={t.id} onClick={()=>reviewTrade(t)} style={{padding:"7px 9px",marginBottom:4,
-                background:selectedTrade?.id===t.id?"#0d3b5e":"#0d1b2e",
-                border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":"#1e5a3a"}`,
-                borderRadius:4,cursor:"pointer"}}>
+              <div key={t.id} onClick={()=>reviewTrade(t)}
+                style={{padding:"7px 9px",marginBottom:4,
+                  background:selectedTrade?.id===t.id?"#0d3b5e":"#0d1b2e",
+                  border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":"#1e5a3a"}`,
+                  borderRadius:4,cursor:"pointer"}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
                   <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{t.symbol}</span>
                   <span style={{fontSize:9,color:"#ffeb3b",fontWeight:700}}>OPEN</span>
@@ -1516,17 +1248,24 @@ function ChartTab({trades, initialSym}) {
             ))}
             {closedTrades.length>0&&<div style={{fontSize:8,color:"#3a6e9a",letterSpacing:1,marginBottom:4,marginTop:6}}>✅ CLOSED</div>}
             {closedTrades.map(t=>(
-              <div key={t.id} onClick={()=>reviewTrade(t)} style={{padding:"7px 9px",marginBottom:4,
-                background:selectedTrade?.id===t.id?"#0d3b5e":parseFloat(t.pnl)>=0?"#051a05":"#1a0505",
-                border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":parseFloat(t.pnl)>=0?"#1e5a3a":"#5a1e1e"}`,
-                borderRadius:4,cursor:"pointer"}}>
+              <div key={t.id} onClick={()=>reviewTrade(t)}
+                style={{padding:"7px 9px",marginBottom:4,
+                  background:selectedTrade?.id===t.id?"#0d3b5e":parseFloat(t.pnl)>=0?"#051a05":"#1a0505",
+                  border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":parseFloat(t.pnl)>=0?"#1e5a3a":"#5a1e1e"}`,
+                  borderRadius:4,cursor:"pointer"}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
                   <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{t.symbol}</span>
                   <span style={{fontSize:11,fontWeight:700,color:pnlColor(t.pnl)}}>{parseFloat(t.pnl)>=0?"+":""}${parseFloat(t.pnl).toFixed(0)}</span>
                 </div>
                 <div style={{fontSize:9,color:dirColor(t.direction)}}>{t.direction}</div>
-                <div style={{fontSize:9,color:"#3a6e9a"}}>${t.entry} → ${t.exit}</div>
-                {t.checks&&(()=>{const y=Object.values(t.checks).filter(v=>v===true).length,tot=Object.values(t.checks).length,sc=tot>0?Math.round(y/tot*100):null; return sc!==null?<div style={{fontSize:8,color:sc>=80?"#00e676":sc>=60?"#ff9800":"#ff1744"}}>Setup: {sc}% aligned</div>:null;})()}
+                <div style={{fontSize:9,color:"#3a6e9a"}}>${t.entry}{t.exit?` → $${t.exit}`:""}</div>
+                {t.checks&&(()=>{
+                  const y=Object.values(t.checks).filter(v=>v===true).length;
+                  const tot=Object.values(t.checks).length;
+                  const sc=tot>0?Math.round(y/tot*100):null;
+                  const col=sc>=80?"#00e676":sc>=60?"#ff9800":"#ff1744";
+                  return sc!==null?<div style={{fontSize:8,color:col}}>Setup: {sc}% aligned</div>:null;
+                })()}
               </div>
             ))}
           </div>
@@ -1535,6 +1274,7 @@ function ChartTab({trades, initialSym}) {
     </div>
   );
 }
+
 
 
 // ─── EMA SCANNER ──────────────────────────────────────────────────────────────
