@@ -1726,22 +1726,19 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
     for(let b=0;b<syms.length;b+=BATCH){
       const batch=syms.slice(b,b+BATCH);
       await Promise.all(batch.map(async sym=>{
-      const sym=syms[i];
-      try {
-        const [r1,r2,r3,r4]=await Promise.all(tfs.map(tf=>analyzeSHAHT(sym,tf)));
-        const price=(r1||r2||r3||r4)?.price||"—";
-        const isSell=direction==="SELL";
-        const shahtResults=[r1,r2,r3,r4];
-        const matchCount=shahtResults.filter(r=>r&&(isSell?(r.algo1==="DOWN"&&r.algo2==="DOWN"):(r.algo1==="UP"&&r.algo2==="UP"))).length;
-        const totalFetched=shahtResults.filter(Boolean).length;
-        const fullyAligned=totalFetched===4&&matchCount===4;
-        const flipCount=shahtResults.filter(r=>r&&(isSell?r.htSellSignal:r.htBuySignal)).length;
-        const shaFlipCount=shahtResults.filter(r=>r&&r.shaFlipped&&(isSell?!r.isBull:r.isBull)).length;
-        if(totalFetched===0) continue;
-        all.push({symbol:sym,price,r1,r2,r3,r4,fullyAligned,matchCount,totalFetched,flipCount,shaFlipCount});
-      } catch(e){failed.push(sym);}
-      
-    }
+        try {
+          const [r1,r2,r3,r4]=await Promise.all(tfs.map(tf=>analyzeSHAHT(sym,tf)));
+          const price=(r1||r2||r3||r4)?.price||"—";
+          const isSell=direction==="SELL";
+          const shahtResults=[r1,r2,r3,r4];
+          const matchCount=shahtResults.filter(r=>r&&(isSell?(r.algo1==="DOWN"&&r.algo2==="DOWN"):(r.algo1==="UP"&&r.algo2==="UP"))).length;
+          const totalFetched=shahtResults.filter(Boolean).length;
+          const fullyAligned=totalFetched===4&&matchCount===4;
+          const flipCount=shahtResults.filter(r=>r&&(isSell?r.htSellSignal:r.htBuySignal)).length;
+          const shaFlipCount=shahtResults.filter(r=>r&&r.shaFlipped&&(isSell?!r.isBull:r.isBull)).length;
+          if(totalFetched===0) return;
+          all.push({symbol:sym,price,r1,r2,r3,r4,fullyAligned,matchCount,totalFetched,flipCount,shaFlipCount});
+        } catch(e){failed.push(sym);}
       }));
       setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
     }
