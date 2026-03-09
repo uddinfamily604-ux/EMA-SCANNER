@@ -586,6 +586,15 @@ function StatBox({label,value,color="#c9d8e8",bg="#0d1b2e",border="#1e3a5a",sub=
   );
 }
 
+function calcPnl(direction, type, entry, exit, qty) {
+  const e = parseFloat(entry), x = parseFloat(exit), q = parseFloat(qty)||1;
+  if(!e||!x) return 0;
+  const mult = (type==="OPTIONS"||type==="CALL"||type==="PUT") ? 100 : 1;
+  const longTypes = ["BUY","BUY CALL","SELL PUT","COVER"];
+  const dir = longTypes.includes(direction) ? 1 : -1;
+  return dir * (x - e) * q * mult;
+}
+
 function BondoFund() {
   const [trades, setTrades] = useState(()=>getBondoFundData());
   const [sym, setSym] = useState("");
