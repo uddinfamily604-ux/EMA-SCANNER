@@ -598,6 +598,41 @@ function BondoFund() {
   const [view, setView] = useState("dashboard"); // dashboard | trades | add
   const [exitInputs, setExitInputs] = useState({});
   const [confirmReset, setConfirmReset] = useState(false);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const [liveQuote, setLiveQuote] = useState(null);
+  const symDebounceRef = useRef(null);
+
+  // Auto-fetch live price when symbol is typed (debounced 600ms)
+  const fetchLivePrice = async (symbol) => {
+    if(!symbol || symbol.length < 1) { setLiveQuote(null); return; }
+    setFetchingPrice(true);
+    try {
+      const res = await fetch(`https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${API_KEY}`);
+      const json = await res.json();
+      if(json.results && json.results.p) {
+        const price = parseFloat(json.results.p.toFixed(2));
+        setLiveQuote(price);
+        setEntry(price.toString());
+      } else {
+        // Fallback: prev close from aggs
+        const res2 = await fetch(`https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${API_KEY}`);
+        const json2 = await res2.json();
+        if(json2.results && json2.results[0]) {
+          const price = parseFloat(json2.results[0].c.toFixed(2));
+          setLiveQuote(price);
+          setEntry(price.toString());
+        } else { setLiveQuote(null); }
+      }
+    } catch(e) { setLiveQuote(null); }
+    setFetchingPrice(false);
+  };
+
+  const handleSymChange = (val) => {
+    setSym(val);
+    setLiveQuote(null);
+    if(symDebounceRef.current) clearTimeout(symDebounceRef.current);
+    symDebounceRef.current = setTimeout(() => fetchLivePrice(val), 600);
+  };
 
   const s = calcFundStats(trades);
 
@@ -632,7 +667,7 @@ function BondoFund() {
     };
     const updated = [t, ...trades];
     saveBondoFund(updated); setTrades(updated);
-    setSym(""); setEntry(""); setExit(""); setQty("1"); setNote(""); setView("trades");
+    setSym(""); setEntry(""); setExit(""); setQty("1"); setNote(""); setLiveQuote(null); setView("trades");
   };
 
   const closeTrade = (id)=>{
@@ -834,8 +869,10 @@ function BondoFund() {
           <div style={{display:"flex",gap:8,marginBottom:10}}>
             <div style={{flex:2}}>
               <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>SYMBOL</div>
-              <input value={sym} onChange={e=>setSym(e.target.value.toUpperCase())} placeholder="e.g. SPY, VIX, BTC"
-                style={{width:"100%",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+              <input value={sym} onChange={e=>handleSymChange(e.target.value.toUpperCase())} placeholder="e.g. SPY, VIX"
+                style={{width:"100%",background:"#0d1b2e",border:`1px solid ${liveQuote?"#00e676":"#1e3a5a"}`,borderRadius:4,color:"#e8f4ff",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+              {fetchingPrice&&<div style={{fontSize:9,color:"#ff9800",marginTop:3}}>⟳ Fetching live price...</div>}
+              {liveQuote&&!fetchingPrice&&<div style={{fontSize:9,color:"#00e676",marginTop:3}}>✅ Live: ${liveQuote} (auto-filled)</div>}
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ORDER TYPE</div>
@@ -890,9 +927,9 @@ function BondoFund() {
 
           <div style={{display:"flex",gap:8,marginBottom:10}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ENTRY PRICE $</div>
-              <input value={entry} onChange={e=>setEntry(e.target.value)} placeholder="0.00"
-                style={{width:"100%",background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ENTRY PRICE $ {liveQuote&&<span style={{color:"#00e676"}}>● LIVE</span>}</div>
+              <input value={entry} onChange={e=>setEntry(e.target.value)} placeholder="Auto-fills from live price"
+                style={{width:"100%",background:liveQuote?"#051a05":"#0d1b2e",border:`1px solid ${liveQuote?"#00e676":"#ffeb3b"}`,borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>EXIT PRICE $ (optional)</div>
