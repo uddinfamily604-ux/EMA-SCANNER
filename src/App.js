@@ -55,11 +55,7 @@ function clearSignalLog() {
 }
 
 // ─── P&L TRACKER ─────────────────────────────────────────────────────────────
-let PNL_TRADES = [];
-try { PNL_TRADES = JSON.parse(localStorage.getItem("alo_pnl")||"[]"); } catch(e){}
-function savePNL() {
-  try { localStorage.setItem("alo_pnl", JSON.stringify(PNL_TRADES)); } catch(e){}
-}
+
 
 // ─── MARKET HOURS CHECK ───────────────────────────────────────────────────────
 function isMarketOpen() {
@@ -506,141 +502,446 @@ function SignalLogPanel({logVersion}) {
   );
 }
 
-// ─── P&L TRACKER ─────────────────────────────────────────────────────────────
-function PNLTracker() {
-  const [show, setShow] = useState(false);
-  const [trades, setTrades] = useState(PNL_TRADES);
-  const [sym, setSym] = useState("");
-  const [dir, setDir] = useState("SELL");
-  const [entry, setEntry] = useState("");
-  const [exit, setExit] = useState("");
-  const [qty, setQty] = useState("1");
-  const [note, setNote] = useState("");
+// ─── BONDO FUND — FULL HEDGE FUND P&L ────────────────────────────────────────
+const STARTING_BALANCE = 100000;
 
-  const addTrade = ()=>{
-    if(!sym||!entry) return;
-    const e=parseFloat(entry), x=parseFloat(exit)||0, q=parseInt(qty)||1;
-    const pnl = x ? ((dir==="SELL"?e-x:x-e)*q*100).toFixed(2) : null;
-    const t = {
-      id: Date.now(), symbol:sym.toUpperCase(), direction:dir,
-      entry:e, exit:x||null, qty:q, pnl, note,
-      timestamp: getETDateTime(), open:!x
-    };
-    PNL_TRADES = [t, ...PNL_TRADES];
-    savePNL(); setTrades([...PNL_TRADES]);
-    setSym(""); setEntry(""); setExit(""); setQty("1"); setNote("");
-  };
+function getBondoFundData() {
+  try { return JSON.parse(localStorage.getItem("bondo_fund")||"[]"); } catch(e){ return []; }
+}
+function saveBondoFund(trades) {
+  try { localStorage.setItem("bondo_fund", JSON.stringify(trades)); } catch(e){}
+}
 
-  const closeTrade = (id, exitPrice)=>{
-    PNL_TRADES = PNL_TRADES.map(t=>{
-      if(t.id!==id) return t;
-      const x=parseFloat(exitPrice);
-      const pnl=((t.direction==="SELL"?t.entry-x:x-t.entry)*t.qty*100).toFixed(2);
-      return {...t, exit:x, pnl, open:false, closedAt:getETDateTime()};
-    });
-    savePNL(); setTrades([...PNL_TRADES]);
-  };
+function calcFundStats(trades) {
+  const closed = trades.filter(t=>t.pnl!==null);
+  const open = trades.filter(t=>t.pnl===null);
+  const totalPnl = closed.reduce((a,t)=>a+parseFloat(t.pnl),0);
+  const nav = STARTING_BALANCE + totalPnl;
+  const roi = (totalPnl/STARTING_BALANCE)*100;
+  const wins = closed.filter(t=>parseFloat(t.pnl)>0);
+  const losses = closed.filter(t=>parseFloat(t.pnl)<0);
+  const winRate = closed.length>0?(wins.length/closed.length*100):0;
+  const avgWin = wins.length>0?wins.reduce((a,t)=>a+parseFloat(t.pnl),0)/wins.length:0;
+  const avgLoss = losses.length>0?Math.abs(losses.reduce((a,t)=>a+parseFloat(t.pnl),0)/losses.length):0;
+  const profitFactor = avgLoss>0?(avgWin*wins.length)/(avgLoss*Math.max(losses.length,1)):avgWin>0?999:0;
+  let peak=STARTING_BALANCE, maxDD=0, running=STARTING_BALANCE;
+  [...closed].reverse().forEach(t=>{
+    running+=parseFloat(t.pnl);
+    if(running>peak) peak=running;
+    const dd=peak-running;
+    if(dd>maxDD) maxDD=dd;
+  });
+  const maxDDPct = peak>0?(maxDD/peak*100):0;
+  const bondo = Math.max(0,totalPnl)*0.20;
+  const sharpe = avgLoss>0?(avgWin/avgLoss).toFixed(2):"∞";
+  return {totalPnl,nav,roi,wins:wins.length,losses:losses.length,winRate,avgWin,avgLoss,profitFactor,maxDD,maxDDPct,bondo,sharpe,closed:closed.length,openCount:open.length};
+}
 
-  const deleteTrade = (id)=>{
-    PNL_TRADES = PNL_TRADES.filter(t=>t.id!==id);
-    savePNL(); setTrades([...PNL_TRADES]);
-  };
-
-  const totalPnl = trades.filter(t=>t.pnl!==null).reduce((a,t)=>a+parseFloat(t.pnl),0);
-  const wins = trades.filter(t=>t.pnl!==null&&parseFloat(t.pnl)>0).length;
-  const losses = trades.filter(t=>t.pnl!==null&&parseFloat(t.pnl)<0).length;
-  const bondo = (Math.max(0,totalPnl)*0.20).toFixed(2);
-
+function MiniEquityCurve({trades}) {
+  const closed = [...trades].filter(t=>t.pnl!==null).reverse();
+  if(closed.length<2) return (
+    <div style={{textAlign:"center",padding:"20px 0",color:"#2a5a7a",fontSize:10}}>
+      📈 Equity curve appears after 2+ closed trades
+    </div>
+  );
+  const points=[STARTING_BALANCE];
+  let bal=STARTING_BALANCE;
+  closed.forEach(t=>{ bal+=parseFloat(t.pnl); points.push(bal); });
+  const min=Math.min(...points), max=Math.max(...points);
+  const range=max-min||1;
+  const W=500, H=100;
+  const pts=points.map((v,i)=>{
+    const x=(i/(points.length-1))*W;
+    const y=H-((v-min)/range*(H-15))-8;
+    return `${x},${y}`;
+  }).join(" ");
+  const isUp=points[points.length-1]>=STARTING_BALANCE;
+  const color=isUp?"#00e676":"#ff1744";
+  const baseY=H-((STARTING_BALANCE-min)/range*(H-15))-8;
   return (
-    <div style={{borderTop:"1px solid #1e3a5a"}}>
-      <button onClick={()=>setShow(s=>!s)} style={{width:"100%",padding:"8px 12px",background:"#080e1a",border:"none",borderBottom:"1px solid #1e3a5a",color:"#ff9800",fontSize:11,fontFamily:"inherit",fontWeight:700,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",letterSpacing:1}}>
-        <span>💰 P&L TRACKER</span>
-        <span style={{color:totalPnl>=0?"#00e676":"#ff1744",fontWeight:700}}>{totalPnl>=0?"+":""}{totalPnl.toFixed(2)} {show?"▲":"▼"}</span>
-      </button>
-      {show&&(
-        <div style={{padding:"10px 12px",background:"#080e1a",display:"flex",flexDirection:"column",gap:10}}>
-          {/* Stats */}
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <div style={{padding:"6px 10px",background:"#0d1b2e",borderRadius:5,border:"1px solid #1e3a5a",textAlign:"center"}}>
-              <div style={{fontSize:9,color:"#2a5a7a"}}>NET P&L</div>
-              <div style={{fontSize:14,fontWeight:700,color:totalPnl>=0?"#00e676":"#ff1744"}}>{totalPnl>=0?"+":""}{totalPnl.toFixed(2)}</div>
-            </div>
-            <div style={{padding:"6px 10px",background:"#0d1b2e",borderRadius:5,border:"1px solid #1e3a5a",textAlign:"center"}}>
-              <div style={{fontSize:9,color:"#2a5a7a"}}>W/L</div>
-              <div style={{fontSize:13,fontWeight:700}}><span style={{color:"#00e676"}}>{wins}W</span> / <span style={{color:"#ff1744"}}>{losses}L</span></div>
-            </div>
-            <div style={{padding:"6px 10px",background:"#0d1b2e",borderRadius:5,border:"1px solid #00e676",textAlign:"center"}}>
-              <div style={{fontSize:9,color:"#00e676"}}>🙏 BONDO 20%</div>
-              <div style={{fontSize:13,fontWeight:700,color:"#00e676"}}>${bondo}</div>
-            </div>
-          </div>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block"}}>
+      <defs>
+        <linearGradient id="curveGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${H} ${pts} ${W},${H}`} fill="url(#curveGrad)"/>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5"/>
+      <line x1="0" y1={baseY} x2={W} y2={baseY} stroke="#1e3a5a" strokeWidth="1" strokeDasharray="4,4"/>
+      <text x="4" y="12" fill="#2a5a7a" fontSize="9">${(max/1000).toFixed(1)}k</text>
+      <text x="4" y={H-3} fill="#2a5a7a" fontSize="9">${(min/1000).toFixed(1)}k</text>
+      <text x={W/2-20} y="12" fill="#3a6e9a" fontSize="9">BONDO EQUITY CURVE</text>
+    </svg>
+  );
+}
 
-          {/* Add Trade */}
-          <div style={{padding:8,background:"#0d1b2e",borderRadius:5,border:"1px solid #1e3a5a"}}>
-            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:6,fontWeight:700,letterSpacing:1}}>+ LOG TRADE</div>
-            <div style={{display:"flex",gap:5,marginBottom:5,flexWrap:"wrap"}}>
-              <input value={sym} onChange={e=>setSym(e.target.value)} placeholder="SYMBOL"
-                style={{flex:1,minWidth:60,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#e8f4ff",padding:"4px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-              <select value={dir} onChange={e=>setDir(e.target.value)}
-                style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:dir==="SELL"?"#ff1744":"#00e676",padding:"4px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}>
-                <option>SELL</option><option>BUY</option>
-              </select>
-              <input value={qty} onChange={e=>setQty(e.target.value)} placeholder="QTY"
-                style={{width:40,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#c9d8e8",padding:"4px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-            </div>
-            <div style={{display:"flex",gap:5,marginBottom:5}}>
-              <input value={entry} onChange={e=>setEntry(e.target.value)} placeholder="Entry $"
-                style={{flex:1,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"4px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-              <input value={exit} onChange={e=>setExit(e.target.value)} placeholder="Exit $ (opt)"
-                style={{flex:1,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#00e676",padding:"4px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-            </div>
-            <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Note (optional)"
-              style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#8ab4cc",padding:"4px 6px",fontSize:10,fontFamily:"inherit",outline:"none",boxSizing:"border-box",marginBottom:5}}/>
-            <button onClick={addTrade} style={{width:"100%",padding:"5px",background:"linear-gradient(135deg,#0d3b0d,#0a550a)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:10,fontFamily:"inherit",fontWeight:700,cursor:"pointer"}}>
-              + ADD TRADE
-            </button>
-          </div>
-
-          {/* Trade List */}
-          <div style={{maxHeight:250,overflowY:"auto"}}>
-            {trades.length===0&&<div style={{fontSize:10,color:"#2a5a7a",textAlign:"center",padding:10}}>No trades yet</div>}
-            {trades.map(t=>(
-              <TradeRow key={t.id} trade={t} onClose={closeTrade} onDelete={deleteTrade}/>
-            ))}
-          </div>
-        </div>
-      )}
+function StatBox({label,value,color="#c9d8e8",bg="#0d1b2e",border="#1e3a5a",sub=null}) {
+  return (
+    <div style={{padding:"10px 12px",background:bg,borderRadius:6,border:`1px solid ${border}`,textAlign:"center",flex:1,minWidth:90}}>
+      <div style={{fontSize:8,color:"#2a5a7a",letterSpacing:1,marginBottom:4}}>{label}</div>
+      <div style={{fontSize:15,fontWeight:700,color}}>{value}</div>
+      {sub&&<div style={{fontSize:8,color:"#3a6e9a",marginTop:2}}>{sub}</div>}
     </div>
   );
 }
 
-function TradeRow({trade,onClose,onDelete}) {
-  const [exitVal, setExitVal] = useState("");
-  const pnlColor = trade.pnl===null?"#ffeb3b":parseFloat(trade.pnl)>=0?"#00e676":"#ff1744";
+function BondoFund() {
+  const [trades, setTrades] = useState(()=>getBondoFundData());
+  const [sym, setSym] = useState("");
+  const [dir, setDir] = useState("SELL");
+  const [type, setType] = useState("OPTIONS");
+  const [entry, setEntry] = useState("");
+  const [exit, setExit] = useState("");
+  const [qty, setQty] = useState("1");
+  const [note, setNote] = useState("");
+  const [view, setView] = useState("dashboard"); // dashboard | trades | add
+  const [exitInputs, setExitInputs] = useState({});
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const s = calcFundStats(trades);
+
+  // ORDER TYPE SYSTEM
+  // BUY       → profit when price goes UP   → pnl = (exit - entry) * qty * multiplier
+  // SELL      → closes a BUY position       → pnl = (entry - exit) * qty * multiplier  
+  // SHORT     → profit when price goes DOWN → pnl = (entry - exit) * qty * multiplier
+  // COVER     → closes a SHORT position     → pnl = (entry - exit) * qty * multiplier
+  // BUY CALL  → profit when price goes UP   → pnl = (exit - entry) * qty * 100
+  // BUY PUT   → profit when price goes DOWN → pnl = (exit - entry) * qty * 100
+  // SELL CALL → profit when price goes DOWN → pnl = (entry - exit) * qty * 100
+  // SELL PUT  → profit when price goes UP   → pnl = (entry - exit) * qty * 100
+
+  const calcPnl = (orderType, assetType, entryPrice, exitPrice, quantity) => {
+    const e=parseFloat(entryPrice)||0;
+    const x=parseFloat(exitPrice)||0;
+    const q=parseInt(quantity)||1;
+    const multiplier = assetType==="OPTIONS" ? 100 : 1;
+    // Profit direction: +1 means profit when exit > entry, -1 means profit when exit < entry
+    const profitDir = ["BUY","BUY CALL","SELL PUT"].includes(orderType) ? 1 : -1;
+    return parseFloat(((x - e) * profitDir * q * multiplier).toFixed(2));
+  };
+
+  const addTrade = ()=>{
+    if(!sym||!entry) return;
+    const pnl = exit ? calcPnl(dir, type, entry, exit, qty) : null;
+    const t = {
+      id:Date.now(), symbol:sym.toUpperCase(), direction:dir, type,
+      entry:parseFloat(entry), exit:exit?parseFloat(exit):null, qty:parseInt(qty)||1, pnl,
+      note, timestamp:getETDateTime(), open:!exit,
+      closedAt: exit?getETDateTime():null
+    };
+    const updated = [t, ...trades];
+    saveBondoFund(updated); setTrades(updated);
+    setSym(""); setEntry(""); setExit(""); setQty("1"); setNote(""); setView("trades");
+  };
+
+  const closeTrade = (id)=>{
+    const exitVal = exitInputs[id];
+    if(!exitVal) return;
+    const updated = trades.map(t=>{
+      if(t.id!==id) return t;
+      const pnl = calcPnl(t.direction, t.type, t.entry, exitVal, t.qty);
+      return {...t, exit:parseFloat(exitVal), pnl, open:false, closedAt:getETDateTime()};
+    });
+    saveBondoFund(updated); setTrades(updated);
+    setExitInputs(prev=>({...prev,[id]:""}));
+  };
+
+  const deleteTrade = (id)=>{
+    const updated = trades.filter(t=>t.id!==id);
+    saveBondoFund(updated); setTrades(updated);
+  };
+
+  const handleReset = ()=>{
+    if(confirmReset) { saveBondoFund([]); setTrades([]); setConfirmReset(false); }
+    else setConfirmReset(true);
+  };
+
+  const navColor = s.nav>=STARTING_BALANCE?"#00e676":"#ff1744";
+  const roiColor = s.roi>=0?"#00e676":"#ff1744";
+
   return (
-    <div style={{padding:"7px 8px",marginBottom:4,background:trade.open?"#0d1b2e":"#080e1a",border:`1px solid ${trade.open?"#1e3a5a":"#0f1e2e"}`,borderRadius:4}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontWeight:700,color:"#e8f4ff",fontSize:12}}>{trade.symbol}</span>
-        <span style={{fontSize:10,color:trade.direction==="SELL"?"#ff1744":"#00e676",fontWeight:700}}>{trade.direction}</span>
-        <span style={{fontSize:12,fontWeight:700,color:pnlColor}}>
-          {trade.pnl===null?"OPEN":`${parseFloat(trade.pnl)>=0?"+":""}${trade.pnl}`}
-        </span>
-        <button onClick={()=>onDelete(trade.id)} style={{background:"none",border:"none",color:"#2a5a7a",cursor:"pointer",fontSize:12,padding:"0 2px"}}>✕</button>
+    <div style={{flex:1,display:"flex",flexDirection:"column",background:"#080e1a",overflowY:"auto"}}>
+      {/* FUND HEADER */}
+      <div style={{background:"linear-gradient(135deg,#0a1520,#0d1b2e)",borderBottom:"2px solid #1e3a5a",padding:"16px 20px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>🏦</span>
+              <span style={{fontSize:18,fontWeight:700,color:"#e8f4ff",letterSpacing:2}}>BONDO FUND</span>
+              <span style={{fontSize:10,color:"#00e676",padding:"2px 8px",border:"1px solid #00e676",borderRadius:3}}>PAPER TRADING</span>
+            </div>
+            <div style={{fontSize:10,color:"#3a6e9a",marginTop:4}}>Starting Capital: $100,000 · For educational purposes only</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:28,fontWeight:700,color:navColor}}>${s.nav.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div style={{fontSize:12,color:roiColor,fontWeight:700}}>{s.roi>=0?"+":""}{s.roi.toFixed(2)}% ROI · {s.totalPnl>=0?"+":""}{s.totalPnl.toFixed(2)} P&L</div>
+          </div>
+        </div>
+
+        {/* EQUITY CURVE */}
+        <div style={{marginTop:12,background:"#080e1a",borderRadius:6,border:"1px solid #1e3a5a",padding:"10px",overflow:"hidden"}}>
+          <MiniEquityCurve trades={trades}/>
+        </div>
       </div>
-      <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>
-        Entry: <span style={{color:"#ffeb3b"}}>${trade.entry}</span>
-        {trade.exit&&<> → Exit: <span style={{color:"#00e676"}}>${trade.exit}</span></>}
-        {" · "}Qty:{trade.qty}
-        {trade.note&&<> · {trade.note}</>}
-      </div>
-      <div style={{fontSize:9,color:"#2a4a6a",marginTop:2}}>🕐 {trade.timestamp}</div>
-      {trade.open&&(
-        <div style={{display:"flex",gap:4,marginTop:5}}>
-          <input value={exitVal} onChange={e=>setExitVal(e.target.value)} placeholder="Exit price"
-            style={{flex:1,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:3,color:"#00e676",padding:"3px 6px",fontSize:10,fontFamily:"inherit",outline:"none"}}/>
-          <button onClick={()=>{if(exitVal)onClose(trade.id,exitVal);}} style={{padding:"3px 8px",background:"#0a2a0a",border:"1px solid #00e676",borderRadius:3,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>
-            CLOSE
+
+      {/* TABS */}
+      <div style={{display:"flex",background:"#0a1520",borderBottom:"1px solid #1e3a5a"}}>
+        {[["dashboard","📊 DASHBOARD"],["trades","📋 TRADES"],["add","+ LOG TRADE"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setView(id)} style={{padding:"10px 18px",fontFamily:"inherit",fontSize:11,fontWeight:700,
+            background:view===id?"#0d1e30":"transparent",
+            borderBottom:view===id?"2px solid #ff9800":"2px solid transparent",
+            color:view===id?"#ff9800":"#3a6e9a",border:"none",cursor:"pointer",marginBottom:"-1px"}}>
+            {label}
           </button>
+        ))}
+      </div>
+
+      {/* DASHBOARD VIEW */}
+      {view==="dashboard"&&(
+        <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:14}}>
+          {/* TOP STATS ROW */}
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <StatBox label="NET P&L" value={`${s.totalPnl>=0?"+":""}$${s.totalPnl.toFixed(0)}`} color={s.totalPnl>=0?"#00e676":"#ff1744"} bg={s.totalPnl>=0?"#051a05":"#1a0505"} border={s.totalPnl>=0?"#00e676":"#ff1744"}/>
+            <StatBox label="NAV" value={`$${(s.nav/1000).toFixed(1)}k`} color="#e8f4ff"/>
+            <StatBox label="ROI %" value={`${s.roi>=0?"+":""}${s.roi.toFixed(2)}%`} color={roiColor}/>
+            <StatBox label="WIN RATE" value={`${s.winRate.toFixed(0)}%`} color={s.winRate>=50?"#00e676":"#ff9800"} sub={`${s.wins}W / ${s.losses}L`}/>
+          </div>
+
+          {/* SECOND STATS ROW */}
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <StatBox label="AVG WIN" value={`+$${s.avgWin.toFixed(0)}`} color="#00e676"/>
+            <StatBox label="AVG LOSS" value={`-$${s.avgLoss.toFixed(0)}`} color="#ff1744"/>
+            <StatBox label="PROFIT FACTOR" value={s.profitFactor>99?"∞":s.profitFactor.toFixed(2)} color={s.profitFactor>=2?"#00e676":s.profitFactor>=1?"#ff9800":"#ff1744"} sub="(>2 = excellent)"/>
+            <StatBox label="SHARPE RATIO" value={s.sharpe} color="#00b4d8" sub="win/loss ratio"/>
+          </div>
+
+          {/* THIRD ROW */}
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <StatBox label="MAX DRAWDOWN" value={`-$${s.maxDD.toFixed(0)}`} color="#ff5722" sub={`${s.maxDDPct.toFixed(1)}% from peak`}/>
+            <StatBox label="TOTAL TRADES" value={s.closed} sub={`${s.openCount} open`} color="#c9d8e8"/>
+            <StatBox label="STARTING" value="$100,000" color="#3a6e9a"/>
+          </div>
+
+          {/* BONDO CHARITY BOX */}
+          <div style={{padding:"14px 18px",background:"linear-gradient(135deg,#051a05,#0a2a0a)",border:"2px solid #00e676",borderRadius:8}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:11,color:"#00e676",fontWeight:700,letterSpacing:2}}>🙏 BONDO CHARITY ALLOCATION</div>
+                <div style={{fontSize:10,color:"#3a6e9a",marginTop:3}}>20% of all profits → Bondo 501(c)(3)</div>
+                <div style={{fontSize:9,color:"#2a5a7a",marginTop:2}}>Supporting elderly & those in need</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:28,fontWeight:700,color:"#00e676"}}>${s.bondo.toFixed(2)}</div>
+                <div style={{fontSize:9,color:"#3a6e9a"}}>reserved for charity</div>
+              </div>
+            </div>
+            {/* Bondo progress bar */}
+            <div style={{marginTop:10,background:"#0d1b2e",borderRadius:4,height:8,overflow:"hidden"}}>
+              <div style={{width:`${Math.min(100,(s.bondo/1000)*100)}%`,height:"100%",background:"linear-gradient(90deg,#00e676,#69f0ae)",borderRadius:4,transition:"width 0.5s"}}/>
+            </div>
+            <div style={{fontSize:9,color:"#2a5a7a",marginTop:4}}>Goal: $1,000 for Bondo Charity · {((s.bondo/1000)*100).toFixed(1)}% reached</div>
+          </div>
+
+          {/* PERFORMANCE RATING */}
+          <div style={{padding:"12px 16px",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:6}}>
+            <div style={{fontSize:9,color:"#3a6e9a",fontWeight:700,letterSpacing:1,marginBottom:8}}>📊 FUND PERFORMANCE RATING</div>
+            {[
+              ["Win Rate",s.winRate,100,s.winRate>=60?"EXCELLENT":s.winRate>=50?"GOOD":s.winRate>=40?"AVERAGE":"NEEDS WORK",s.winRate>=60?"#00e676":s.winRate>=50?"#ff9800":"#ff1744"],
+              ["Profit Factor",Math.min(s.profitFactor,10)*10,100,s.profitFactor>=2?"EXCELLENT":s.profitFactor>=1.5?"GOOD":s.profitFactor>=1?"AVERAGE":"LOSING",s.profitFactor>=2?"#00e676":s.profitFactor>=1?"#ff9800":"#ff1744"],
+              ["ROI",Math.min(Math.max(s.roi+50,0),100),100,s.roi>=20?"EXCELLENT":s.roi>=10?"GOOD":s.roi>=0?"AVERAGE":"IN DRAWDOWN",s.roi>=20?"#00e676":s.roi>=0?"#ff9800":"#ff1744"],
+            ].map(([label,val,max,rating,color])=>(
+              <div key={label} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:10,color:"#3a6e9a"}}>{label}</span>
+                  <span style={{fontSize:10,color,fontWeight:700}}>{rating}</span>
+                </div>
+                <div style={{background:"#080e1a",borderRadius:3,height:5,overflow:"hidden"}}>
+                  <div style={{width:`${Math.min(100,val)}%`,height:"100%",background:color,borderRadius:3,transition:"width 0.5s"}}/>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* RESET */}
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={handleReset} style={{padding:"5px 12px",background:confirmReset?"#2a0a0a":"#0d1b2e",border:`1px solid ${confirmReset?"#ff1744":"#1e3a5a"}`,borderRadius:4,color:confirmReset?"#ff1744":"#2a5a7a",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>
+              {confirmReset?"⚠️ CONFIRM RESET — THIS CANNOT BE UNDONE":"🗑 Reset Fund"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TRADES VIEW */}
+      {view==="trades"&&(
+        <div style={{padding:"12px 16px"}}>
+          {trades.length===0&&(
+            <div style={{textAlign:"center",padding:"40px 20px",color:"#2a5a7a"}}>
+              <div style={{fontSize:40,marginBottom:10}}>📋</div>
+              <div style={{fontSize:14}}>No trades yet</div>
+              <div style={{fontSize:11,marginTop:6}}>Click "+ LOG TRADE" to add your first trade</div>
+            </div>
+          )}
+          {trades.map(t=>{
+            const pnlColor=t.pnl===null?"#ffeb3b":parseFloat(t.pnl)>=0?"#00e676":"#ff1744";
+            const pnlBg=t.pnl===null?"#1a1400":parseFloat(t.pnl)>=0?"#051a05":"#1a0505";
+            return (
+              <div key={t.id} style={{marginBottom:8,padding:"10px 12px",background:t.open?"#0d1b2e":"#080e1a",border:`1px solid ${t.open?"#1e5a3a":pnlBg}`,borderRadius:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{t.symbol}</span>
+                    <span style={{padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700,background:t.direction==="SELL"?"#2a0a0a":"#0a2a0a",color:t.direction==="SELL"?"#ff1744":"#00e676",border:`1px solid ${t.direction==="SELL"?"#ff1744":"#00e676"}`}}>{t.direction}</span>
+                    <span style={{padding:"2px 6px",borderRadius:3,fontSize:9,background:"#0d1b2e",color:"#3a6e9a",border:"1px solid #1e3a5a"}}>{t.type}</span>
+                    {t.open&&<span style={{padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700,background:"#1a1400",color:"#ffeb3b",border:"1px solid #ffeb3b"}}>OPEN</span>}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:14,fontWeight:700,color:pnlColor}}>
+                      {t.pnl===null?"—":`${parseFloat(t.pnl)>=0?"+":""}$${parseFloat(t.pnl).toFixed(2)}`}
+                    </span>
+                    <button onClick={()=>deleteTrade(t.id)} style={{background:"none",border:"none",color:"#2a5a7a",cursor:"pointer",fontSize:14}}>✕</button>
+                  </div>
+                </div>
+                <div style={{fontSize:10,color:"#3a6e9a"}}>
+                  Entry: <span style={{color:"#ffeb3b",fontWeight:700}}>${t.entry}</span>
+                  {t.exit&&<> → Exit: <span style={{color:"#00e676",fontWeight:700}}>${t.exit}</span></>}
+                  {" · "}Qty: <span style={{color:"#c9d8e8"}}>{t.qty}</span>
+                  {t.note&&<> · <span style={{color:"#8ab4cc"}}>{t.note}</span></>}
+                </div>
+                <div style={{fontSize:9,color:"#2a4a6a",marginTop:3}}>
+                  🕐 {t.timestamp}{t.closedAt&&t.closedAt!==t.timestamp?` → Closed: ${t.closedAt}`:""}
+                </div>
+                {t.open&&(
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    <input value={exitInputs[t.id]||""} onChange={e=>setExitInputs(prev=>({...prev,[t.id]:e.target.value}))}
+                      placeholder="Enter exit price to close"
+                      style={{flex:1,background:"#080e1a",border:"1px solid #00e676",borderRadius:3,color:"#00e676",padding:"5px 8px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+                    <button onClick={()=>closeTrade(t.id)} style={{padding:"5px 12px",background:"#0a2a0a",border:"1px solid #00e676",borderRadius:3,color:"#00e676",fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>
+                      ✓ CLOSE
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ADD TRADE VIEW */}
+      {view==="add"&&(
+        <div style={{padding:"20px",maxWidth:500}}>
+          <div style={{fontSize:12,color:"#ff9800",fontWeight:700,letterSpacing:2,marginBottom:16}}>+ LOG NEW TRADE</div>
+
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <div style={{flex:2}}>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>SYMBOL</div>
+              <input value={sym} onChange={e=>setSym(e.target.value.toUpperCase())} placeholder="e.g. SPY, VIX, BTC"
+                style={{width:"100%",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ORDER TYPE</div>
+              <select value={dir} onChange={e=>setDir(e.target.value)}
+                style={{width:"100%",background:"#0d1b2e",border:`1px solid ${["BUY","BUY CALL","SELL PUT"].includes(dir)?"#00e676":"#ff1744"}`,borderRadius:4,
+                color:["BUY","BUY CALL","SELL PUT"].includes(dir)?"#00e676":"#ff1744",
+                padding:"8px 6px",fontSize:12,fontFamily:"inherit",outline:"none",fontWeight:700}}>
+                <optgroup label="── STOCKS ──">
+                  <option value="BUY">▲ BUY (go long)</option>
+                  <option value="SELL">▼ SELL (close long)</option>
+                  <option value="SHORT">▼ SHORT (go short)</option>
+                  <option value="COVER">▲ COVER (close short)</option>
+                </optgroup>
+                <optgroup label="── OPTIONS ──">
+                  <option value="BUY CALL">▲ BUY CALL (bullish)</option>
+                  <option value="BUY PUT">▼ BUY PUT (bearish)</option>
+                  <option value="SELL CALL">▼ SELL CALL (bearish)</option>
+                  <option value="SELL PUT">▲ SELL PUT (bullish)</option>
+                </optgroup>
+                <optgroup label="── CRYPTO ──">
+                  <option value="BUY">▲ BUY CRYPTO</option>
+                  <option value="SHORT">▼ SHORT CRYPTO</option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+
+          {/* ORDER TYPE EXPLAINER */}
+          <div style={{marginBottom:10,padding:"8px 10px",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4}}>
+            {dir==="BUY"&&<div style={{fontSize:9,color:"#00e676"}}>▲ BUY — You profit when price goes <strong>UP</strong>. P&L = (Exit − Entry) × Qty</div>}
+            {dir==="SELL"&&<div style={{fontSize:9,color:"#ff9800"}}>▼ SELL — Closes your BUY position. P&L = (Entry − Exit) × Qty</div>}
+            {dir==="SHORT"&&<div style={{fontSize:9,color:"#ff1744"}}>▼ SHORT — You profit when price goes <strong>DOWN</strong>. P&L = (Entry − Exit) × Qty</div>}
+            {dir==="COVER"&&<div style={{fontSize:9,color:"#ff9800"}}>▲ COVER — Closes your SHORT position. P&L = (Entry − Exit) × Qty</div>}
+            {dir==="BUY CALL"&&<div style={{fontSize:9,color:"#00e676"}}>▲ BUY CALL — Bullish. Profit when stock goes <strong>UP</strong>. P&L = (Exit − Entry) × Qty × 100</div>}
+            {dir==="BUY PUT"&&<div style={{fontSize:9,color:"#ff1744"}}>▼ BUY PUT — Bearish. Profit when stock goes <strong>DOWN</strong>. P&L = (Exit − Entry) × Qty × 100</div>}
+            {dir==="SELL CALL"&&<div style={{fontSize:9,color:"#ff1744"}}>▼ SELL CALL — Bearish. Profit when stock stays <strong>BELOW</strong> strike. P&L = (Entry − Exit) × Qty × 100</div>}
+            {dir==="SELL PUT"&&<div style={{fontSize:9,color:"#00e676"}}>▲ SELL PUT — Bullish. Profit when stock stays <strong>ABOVE</strong> strike. P&L = (Entry − Exit) × Qty × 100</div>}
+          </div>
+
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ASSET TYPE</div>
+            <div style={{display:"flex",gap:6}}>
+              {["STOCK","OPTIONS","CRYPTO"].map(t=>(
+                <button key={t} onClick={()=>setType(t)} style={{flex:1,padding:"6px",fontFamily:"inherit",fontSize:10,fontWeight:700,
+                  background:type===t?"#0d3b5e":"#0d1b2e",border:`1px solid ${type===t?"#00b4d8":"#1e3a5a"}`,
+                  color:type===t?"#00b4d8":"#3a6e9a",borderRadius:4,cursor:"pointer"}}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>ENTRY PRICE $</div>
+              <input value={entry} onChange={e=>setEntry(e.target.value)} placeholder="0.00"
+                style={{width:"100%",background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>EXIT PRICE $ (optional)</div>
+              <input value={exit} onChange={e=>setExit(e.target.value)} placeholder="0.00"
+                style={{width:"100%",background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,color:"#00e676",padding:"8px 10px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+            </div>
+            <div style={{width:70}}>
+              <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>CONTRACTS</div>
+              <input value={qty} onChange={e=>setQty(e.target.value)} placeholder="1"
+                style={{width:"100%",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#c9d8e8",padding:"8px 8px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box",fontWeight:700}}/>
+            </div>
+          </div>
+
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>NOTE (optional)</div>
+            <input value={note} onChange={e=>setNote(e.target.value)} placeholder="e.g. SPY put on Saturn-Neptune thesis, VIX call on eclipse..."
+              style={{width:"100%",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"8px 10px",fontSize:11,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
+
+          {/* P&L PREVIEW */}
+          {entry&&exit&&(
+            <div style={{marginBottom:14,padding:"10px 14px",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:6}}>
+              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:4}}>P&L PREVIEW</div>
+              {(()=>{
+                const pnl = calcPnl(dir, type, entry, exit, qty);
+                const color=pnl>=0?"#00e676":"#ff1744";
+                const mult = type==="OPTIONS"?100:1;
+                return (
+                  <div>
+                    <span style={{fontSize:18,fontWeight:700,color}}>{pnl>=0?"+":""}{pnl.toFixed(2)}</span>
+                    <span style={{fontSize:10,color:"#3a6e9a",marginLeft:8}}>({qty} × ${Math.abs(parseFloat(exit)-parseFloat(entry)).toFixed(2)} × {mult})</span>
+                    <div style={{display:"flex",gap:16,marginTop:6}}>
+                      <div style={{fontSize:9,color:color}}>{pnl>=0?"✅ PROFIT":"❌ LOSS"} — {dir}</div>
+                      <div style={{fontSize:9,color:"#00e676"}}>🙏 Bondo 20%: ${Math.max(0,pnl*0.20).toFixed(2)}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          <button onClick={addTrade} disabled={!sym||!entry} style={{width:"100%",padding:"12px",
+            background:sym&&entry?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
+            border:`1px solid ${sym&&entry?"#00e676":"#1e3a5a"}`,
+            color:sym&&entry?"#00e676":"#2a5a7a",
+            borderRadius:6,cursor:sym&&entry?"pointer":"not-allowed",fontSize:13,fontFamily:"inherit",fontWeight:700,letterSpacing:2}}>
+            {exit?"✓ LOG CLOSED TRADE":"+ LOG OPEN TRADE"}
+          </button>
+          <div style={{fontSize:9,color:"#2a4a6a",textAlign:"center",marginTop:8}}>For educational purposes only · Not financial advice</div>
         </div>
       )}
     </div>
@@ -1231,7 +1532,7 @@ export default function App(){
     {id:"ema",label:"📊 EMA",color:"#00b4d8"},
     {id:"ht",label:"★ HALFTREND",color:"#e040fb"},
     {id:"shaht",label:"🔥 SHA+HT",color:"#ff9800"},
-    {id:"pnl",label:"💰 P&L",color:"#00e676"},
+    {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
   ];
 
   const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion};
@@ -1278,8 +1579,8 @@ export default function App(){
           {activeTab==="ht"&&<HalfTrendScanner {...scannerProps}/>}
           {activeTab==="shaht"&&<SHAHTScanner {...scannerProps}/>}
           {activeTab==="pnl"&&(
-            <div style={{flex:1,overflowY:"auto"}}>
-              <PNLTracker/>
+            <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+              <BondoFund/>
             </div>
           )}
         </div>
