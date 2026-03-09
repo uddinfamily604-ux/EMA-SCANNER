@@ -960,7 +960,7 @@ function ChartTab({trades, initialSym}) {
   const [livePrice, setLivePrice] = useState(null);
   const [macdData, setMacdData] = useState([]);
   const [rsiData, setRsiData] = useState([]);
-  const [htData, setHtData] = useState({up:[],down:[]});
+  const [htData, setHtData] = useState({markers:[],htLine:[],atrHighLine:[],atrLowLine:[]});
 
   const chartContainerRef = useRef(null);
   const lwChartRef = useRef(null);
@@ -969,6 +969,10 @@ function ChartTab({trades, initialSym}) {
   const ema50Ref = useRef(null);
   const ema100Ref = useRef(null);
   const ema200Ref = useRef(null);
+  const htLineRef = useRef(null);
+  const htLineDnRef = useRef(null);
+  const htAtrHighRef = useRef(null);
+  const htAtrLowRef = useRef(null);
   const macdCanvasRef = useRef(null);
   const rsiCanvasRef = useRef(null);
   const autoTimerRef = useRef(null);
@@ -993,46 +997,158 @@ function ChartTab({trades, initialSym}) {
     return data.map((d,i)=>{ ema=i===0?d.close:d.close*k+ema*(1-k); return {time:d.time,value:parseFloat(ema.toFixed(4))}; });
   };
 
-  const calcHalfTrend = (data, amp=2) => {
-    const upMarkers=[], downMarkers=[];
-    let trend=0, maxLow=data[0]?.low||0, minHigh=data[0]?.high||0;
-    data.forEach((d,i,arr)=>{
-      const slice=arr.slice(Math.max(0,i-amp),i+1);
-      const highP=Math.max(...slice.map(x=>x.high));
-      const lowP=Math.min(...slice.map(x=>x.low));
-      const atrSlice=arr.slice(Math.max(0,i-13),i+1);
-      const atr=atrSlice.reduce((s,x,j,a)=>s+(j===0?x.high-x.low:Math.max(x.high-x.low,Math.abs(x.high-a[j-1].close),Math.abs(x.low-a[j-1].close))),0)/atrSlice.length*amp;
-      if(trend===0){
-        maxLow=Math.max(maxLow,lowP);
-        if(d.close<maxLow-atr){ trend=1; minHigh=highP; }
-        else upMarkers.push({time:d.time,position:"belowBar",color:"#00e676",shape:"arrowUp",size:0.7});
+  // ── HalfTrend — exact port of Alex Orekhov Pine Script v4 ──
+  // amplitude=2, channelDeviation=2, atr(100)/2
+  const calcHalfTrend = (data, amplitude=2, channelDeviation=2) => {
+    const n = data.length;
+    if(n < 2) return {markers:[], htLine:[], atrHighLine:[], atrLowLine:[]};
+
+    // ATR(100) using Wilder's RMA
+    const trArr = data.map((d,i)=> i===0 ? d.high-d.low :
+      Math.max(d.high-d.low, Math.abs(d.high-data[i-1].close), Math.abs(d.low-data[i-1].close)));
+    const atrArr = [];
+    let rmaVal = trArr.slice(0,100).reduce((a,b)=>a+b,0)/Math.min(100,trArr.length);
+    for(let i=0;i<n;i++){
+      if(i<100){ atrArr.push(trArr.slice(0,i+1).reduce((a,b)=>a+b,0)/(i+1)); }
+      else { rmaVal=(rmaVal*99+trArr[i])/100; atrArr.push(rmaVal); }
+    }
+
+    // SMA of high/low over amplitude
+    const smaHigh = (i) => { let s=0,c=0; for(let j=Math.max(0,i-amplitude+1);j<=i;j++){s+=data[j].high;c++;} return s/c; };
+    const smaLow  = (i) => { let s=0,c=0; for(let j=Math.max(0,i-amplitude+1);j<=i;j++){s+=data[j].low;c++;}  return s/c; };
+
+    // Highest high / lowest low over amplitude bars
+    const highestHigh = (i) => { let m=-Infinity; for(let j=Math.max(0,i-amplitude+1);j<=i;j++) m=Math.max(m,data[j].high); return m; };
+    const lowestLow   = (i) => { let m= Infinity; for(let j=Math.max(0,i-amplitude+1);j<=i;j++) m=Math.min(m,data[j].low);  return m; };
+
+    let trend=0, nextTrend=0;
+    let maxLowPrice = data[0].low;
+    let minHighPrice = data[0].high;
+    let up=0, down=0;
+
+    const markers=[], htLine=[], atrHighLine=[], atrLowLine=[];
+
+    for(let i=0;i<n;i++){
+      const atr2 = atrArr[i]/2;
+      const dev  = channelDeviation * atr2;
+      const highPrice = highestHigh(i);
+      const lowPrice  = lowestLow(i);
+      const highma    = smaHigh(i);
+      const lowma     = smaLow(i);
+      const prevClose = i>0 ? data[i-1].close : data[i].close;
+      const prevLow   = i>0 ? data[i-1].low   : data[i].low;
+      const prevHigh  = i>0 ? data[i-1].high  : data[i].high;
+
+      if(nextTrend===1){
+        maxLowPrice = Math.max(lowPrice, maxLowPrice);
+        if(highma < maxLowPrice && data[i].close < prevLow){
+          trend=1; nextTrend=0; minHighPrice=highPrice;
+        }
       } else {
-        minHigh=Math.min(minHigh,highP);
-        if(d.close>minHigh+atr){ trend=0; maxLow=lowP; }
-        else downMarkers.push({time:d.time,position:"aboveBar",color:"#ff1744",shape:"arrowDown",size:0.7});
+        minHighPrice = Math.min(highPrice, minHighPrice);
+        if(lowma > minHighPrice && data[i].close > prevHigh){
+          trend=0; nextTrend=1; maxLowPrice=lowPrice;
+        }
       }
-    });
-    return {up:upMarkers,down:downMarkers};
+
+      const prevTrend = i>0 ? htLine[i-1]?.trend : 0;
+      let arrowUp=null, arrowDown=null;
+
+      if(trend===0){
+        if(prevTrend!==undefined && prevTrend===1){
+          // just flipped to uptrend
+          up = (down || 0);
+          arrowUp = up - atr2;
+        } else {
+          up = Math.max(maxLowPrice, up||maxLowPrice);
+        }
+        const atrHigh = up + dev;
+        const atrLow  = up - dev;
+        htLine.push({time:data[i].time, value:parseFloat(up.toFixed(4)), trend:0});
+        atrHighLine.push({time:data[i].time, value:parseFloat(atrHigh.toFixed(4))});
+        atrLowLine.push({time:data[i].time,  value:parseFloat(atrLow.toFixed(4))});
+        if(arrowUp!==null){
+          markers.push({time:data[i].time, position:"belowBar", color:"#2962FF", shape:"arrowUp", size:1.5, text:"BUY"});
+        }
+      } else {
+        if(prevTrend!==undefined && prevTrend===0){
+          // just flipped to downtrend
+          down = (up || 0);
+          arrowDown = down + atr2;
+        } else {
+          down = Math.min(minHighPrice, down||minHighPrice);
+        }
+        const atrHigh = down + dev;
+        const atrLow  = down - dev;
+        htLine.push({time:data[i].time, value:parseFloat(down.toFixed(4)), trend:1});
+        atrHighLine.push({time:data[i].time, value:parseFloat(atrHigh.toFixed(4))});
+        atrLowLine.push({time:data[i].time,  value:parseFloat(atrLow.toFixed(4))});
+        if(arrowDown!==null){
+          markers.push({time:data[i].time, position:"aboveBar", color:"#B71D1C", shape:"arrowDown", size:1.5, text:"SELL"});
+        }
+      }
+    }
+    return {markers, htLine, atrHighLine, atrLowLine};
   };
 
+  // ── MACD — exact port of CM_MacD_Ult_MTF_V2.1 Pine Script v5 ──
+  // fast=12, slow=26, signal=9, all EMA
   const calcMACD = (data) => {
-    const k12=2/13,k26=2/27,k9=2/10;
-    let e12=data[0]?.close||0,e26=data[0]?.close||0,sig=0;
+    const ema = (arr, period) => {
+      const k=2/(period+1); let e=arr[0];
+      return arr.map((v,i)=>{ e=i===0?v:v*k+e*(1-k); return e; });
+    };
+    const closes = data.map(d=>d.close);
+    const fast   = ema(closes, 12);
+    const slow   = ema(closes, 26);
+    const macdArr = fast.map((f,i)=>f-slow[i]);
+    const sigArr  = ema(macdArr, 9);
+
     return data.map((d,i)=>{
-      e12=i===0?d.close:d.close*k12+e12*(1-k12);
-      e26=i===0?d.close:d.close*k26+e26*(1-k26);
-      const macd=e12-e26; sig=i===0?macd:macd*k9+sig*(1-k9);
-      return {time:d.time,macd:parseFloat(macd.toFixed(4)),signal:parseFloat(sig.toFixed(4)),hist:parseFloat((macd-sig).toFixed(4))};
+      const macd = macdArr[i], signal = sigArr[i], hist = macd-signal;
+      const prevHist = i>0 ? macdArr[i-1]-sigArr[i-1] : hist;
+      // Histogram colors — exact match to Pine Script
+      const histColor =
+        hist>0 && hist>prevHist ? "#26A69A" :  // above, growing (teal)
+        hist>0 && hist<=prevHist ? "#B2DFDB" : // above, falling (light teal)
+        hist<=0 && hist<prevHist ? "#FF5252" : // below, growing down (red)
+        "#FFCDD2";                              // below, falling up (light red)
+      // Cross signals
+      const prevMacd = macdArr[i-1]||macd, prevSig = sigArr[i-1]||signal;
+      const crossUp = prevSig >= prevMacd && signal < macd;
+      const crossDn = prevSig <= prevMacd && signal > macd;
+      return {
+        time:d.time,
+        macd:parseFloat(macd.toFixed(4)),
+        signal:parseFloat(signal.toFixed(4)),
+        hist:parseFloat(hist.toFixed(4)),
+        histColor, crossUp, crossDn,
+        trendUp: macd>signal
+      };
     });
   };
 
-  const calcRSI = (data,period=14) => {
-    let ag=0,al=0; const res=[];
-    for(let i=1;i<data.length;i++){
-      const diff=data[i].close-data[i-1].close;
-      if(i<=period){ ag+=(diff>0?diff:0)/period; al+=(diff<0?-diff:0)/period; }
-      else{ ag=(ag*(period-1)+(diff>0?diff:0))/period; al=(al*(period-1)+(diff<0?-diff:0))/period; }
-      if(i>=period){ const rs=al===0?100:ag/al; res.push({time:data[i].time,value:parseFloat((100-100/(1+rs)).toFixed(2))}); }
+  // ── RSI — exact port of TradingView built-in Pine Script v5 ──
+  // Uses ta.rma (Wilder's Smoothing), period=14
+  const calcRSI = (data, period=14) => {
+    if(data.length < period+1) return [];
+    const res=[];
+    // Seed: SMA of first `period` gains/losses
+    let upRma=0, downRma=0;
+    for(let i=1;i<=period;i++){
+      const chg=data[i].close-data[i-1].close;
+      upRma   += Math.max(chg,0);
+      downRma += Math.max(-chg,0);
+    }
+    upRma/=period; downRma/=period;
+    const rsiVal=(u,d)=> d===0?100:u===0?0:parseFloat((100-100/(1+u/d)).toFixed(2));
+    res.push({time:data[period].time, value:rsiVal(upRma,downRma)});
+    // Wilder RMA for rest
+    for(let i=period+1;i<data.length;i++){
+      const chg=data[i].close-data[i-1].close;
+      upRma   =(upRma  *(period-1)+Math.max(chg, 0))/period;
+      downRma =(downRma*(period-1)+Math.max(-chg,0))/period;
+      res.push({time:data[i].time, value:rsiVal(upRma,downRma)});
     }
     return res;
   };
@@ -1070,9 +1186,18 @@ function ChartTab({trades, initialSym}) {
     ema50Ref.current.setData(calcEMA(data,50));
     ema100Ref.current.setData(calcEMA(data,100));
     ema200Ref.current.setData(calcEMA(data,200));
-    // HalfTrend markers
-    const allMarkers=[...ht.up,...ht.down].sort((a,b)=>a.time-b.time);
-    candleSeriesRef.current.setMarkers(allMarkers);
+    // HalfTrend line (blue=up, red=down) colored per bar
+    if(ht.htLine.length>0){
+      // Split into up/down colored segments
+      const upSeg=ht.htLine.map(p=>({time:p.time,value:p.value,color:p.trend===0?"#2962FF":"transparent"}));
+      const dnSeg=ht.htLine.map(p=>({time:p.time,value:p.value,color:p.trend===1?"#B71D1C":"transparent"}));
+      htLineRef.current.setData(upSeg);
+      htLineDnRef.current.setData(dnSeg);
+    }
+    // ATR channel bands
+    if(ht.atrHighLine.length>0){ htAtrHighRef.current.setData(ht.atrHighLine); htAtrLowRef.current.setData(ht.atrLowLine); }
+    // Buy/Sell markers — only on trend flip
+    candleSeriesRef.current.setMarkers(ht.markers);
     chart.timeScale().fitContent();
   };
 
@@ -1089,40 +1214,49 @@ function ChartTab({trades, initialSym}) {
   };
 
   // Draw MACD canvas
+  // drawMACD — uses exact Pine Script histogram colors from CM_MacD_Ult_MTF_V2.1
   const drawMACD = () => {
     const canvas=macdCanvasRef.current; if(!canvas||macdData.length===0) return;
     const ctx=canvas.getContext("2d"); const W=canvas.width,H=canvas.height;
     ctx.clearRect(0,0,W,H);
     ctx.fillStyle="#080e1a"; ctx.fillRect(0,0,W,H);
-    // Labels
-    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("MACD",6,12);
+    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("MACD(12,26,9)",6,12);
     const visible=macdData.slice(-120);
     if(visible.length===0) return;
     const hists=visible.map(d=>d.hist);
     const maxH=Math.max(...hists.map(Math.abs))||1;
     const midY=H/2; const barW=Math.max(1,(W-20)/visible.length);
+    // Histogram with exact Pine Script colors
     visible.forEach((d,i)=>{
       const h=(d.hist/maxH)*(midY-15);
-      ctx.fillStyle=d.hist>=0?"rgba(0,230,118,0.8)":"rgba(255,23,68,0.8)";
+      ctx.fillStyle=d.histColor||"#888";
       ctx.fillRect(20+i*barW, h>=0?midY-h:midY, Math.max(1,barW-1), Math.abs(h)||1);
     });
-    // MACD & Signal lines
+    // MACD line — orange (#FF6D00), Signal line — blue (#2962FF) matching Pine
     const drawLine=(arr,color,key)=>{
       ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.beginPath();
       arr.forEach((d,i)=>{ const x=20+i*barW+barW/2; const y=midY-(d[key]/maxH)*(midY-15); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
       ctx.stroke();
     };
-    drawLine(visible,"#00b4d8","macd"); drawLine(visible,"#ff9800","signal");
+    drawLine(visible,"#FF6D00","macd");
+    drawLine(visible,"#2962FF","signal");
+    // Cross dots
+    visible.forEach((d,i)=>{
+      if(d.crossUp||d.crossDn){
+        const x=20+i*barW+barW/2; const y=midY-(d.macd/maxH)*(midY-15);
+        ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2);
+        ctx.fillStyle=d.crossUp?"#4BAF4F":"#B71D1C"; ctx.fill();
+      }
+    });
     // Zero line
     ctx.strokeStyle="#1e3a5a"; ctx.lineWidth=1; ctx.setLineDash([3,3]);
     ctx.beginPath(); ctx.moveTo(20,midY); ctx.lineTo(W,midY); ctx.stroke(); ctx.setLineDash([]);
-    // Current values
+    // Values
     const last=visible[visible.length-1];
-    const col=last.hist>=0?"#00e676":"#ff1744";
-    ctx.fillStyle=col; ctx.font="9px monospace";
-    ctx.fillText(`H:${last.hist.toFixed(3)}`,W-90,12);
-    ctx.fillStyle="#00b4d8"; ctx.fillText(`M:${last.macd.toFixed(3)}`,W-90,22);
-    ctx.fillStyle="#ff9800"; ctx.fillText(`S:${last.signal.toFixed(3)}`,W-90,32);
+    ctx.fillStyle=last.trendUp?"#4BAF4F":"#B71D1C"; ctx.font="9px monospace";
+    ctx.fillText(`MACD:${last.macd.toFixed(3)}`,W-140,12);
+    ctx.fillStyle="#2962FF"; ctx.fillText(`SIG:${last.signal.toFixed(3)}`,W-140,22);
+    ctx.fillStyle=last.hist>=0?"#26A69A":"#FF5252"; ctx.fillText(`HIST:${last.hist.toFixed(3)}`,W-140,32);
   };
 
   // Draw RSI canvas
@@ -1178,6 +1312,11 @@ function ChartTab({trades, initialSym}) {
       ema50Ref.current=chart.addLineSeries({color:"#00b4d8",lineWidth:1,title:"EMA50"});
       ema100Ref.current=chart.addLineSeries({color:"#ff9800",lineWidth:1,title:"EMA100"});
       ema200Ref.current=chart.addLineSeries({color:"#e040fb",lineWidth:1,title:"EMA200"});
+      // HalfTrend line series
+      htLineRef.current=chart.addLineSeries({color:"#2962FF",lineWidth:2,title:"HT",lastValueVisible:false,priceLineVisible:false});
+      htLineDnRef.current=chart.addLineSeries({color:"#B71D1C",lineWidth:2,title:"",lastValueVisible:false,priceLineVisible:false});
+      htAtrHighRef.current=chart.addLineSeries({color:"rgba(183,29,28,0.3)",lineWidth:1,lineStyle:3,lastValueVisible:false,priceLineVisible:false});
+      htAtrLowRef.current=chart.addLineSeries({color:"rgba(41,98,255,0.3)",lineWidth:1,lineStyle:3,lastValueVisible:false,priceLineVisible:false});
       const ro=new ResizeObserver(entries=>{ for(const e of entries) chart.resize(e.contentRect.width,e.contentRect.height); });
       ro.observe(chartContainerRef.current);
       fetchCandles(chartSym,tf);
