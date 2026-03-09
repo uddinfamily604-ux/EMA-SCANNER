@@ -1425,7 +1425,6 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
   const [errors,setErrors]=useState([]);
   const [autoOn,setAutoOn]=useState(false);
   const [autoMin,setAutoMin]=useState(5);
-  const [freshOnly,setFreshOnly]=useState(true);
   const prevAlignedRef = useRef(new Set());
 
   const runScan=useCallback(async()=>{
@@ -1619,6 +1618,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
   const [errors,setErrors]=useState([]);
   const [autoOn,setAutoOn]=useState(false);
   const [autoMin,setAutoMin]=useState(5);
+  const [freshOnly,setFreshOnly]=useState(true);
   const prevAlignedRef = useRef(new Set());
   const tfs=[tf1,tf2,tf3,tf4];
 
@@ -1672,7 +1672,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
     prevAlignedRef.current = alignedKeys;
 
     setResults(all);setErrors(failed);setScanning(false);setLastScan(getETTime());
-  },[symbols,tf1,tf2,tf3,tf4,direction,pushKey,pushToken,soundOn,onSignal]);
+  },[symbols,tf1,tf2,tf3,tf4,direction,freshOnly,pushKey,pushToken,soundOn,onSignal]);
 
   const nextIn = useAutoRefresh(runScan, autoOn, autoMin);
   const fullyAligned=results.filter(r=>r.aligned).length;
