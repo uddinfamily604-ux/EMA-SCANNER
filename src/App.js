@@ -4,6 +4,15 @@ const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
+const WATCHLIST_PRESETS = {
+  "⭐ My Favorites": ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"],
+  "📊 S&P 500 Core": ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","JPM","V","UNH","XOM","LLY","JNJ","WMT","MA","PG","AVGO","HD","CVX","MRK","ABBV","COST","PEP","KO","ADBE","WFC","CRM","TMO","ACN","MCD","CSCO","ABT","GE","BAC","LIN","DHR","TXN","NEE","PM","RTX","AMGN","IBM","INTU","UPS","CAT","SPGI","LOW","GS","ISRG","BKNG","ELV","SYK","VRTX","BLK","AXP","PLD","CB","MDT","GILD","ADI","MS","REGN","MMC","CI","TJX","CME","ZTS","C","MO","DUK","SO","PNC","USB","ICE","NOC","ITW","AON","EOG","SLB","FDX","CL","MCK","PSX","EMR","MPC","VLO","FCX","NEM","WM","EW","F","GM","HON","GD","LMT","NSC","CSX","UNP","DE","MMM","APD","ECL","KLAC","LRCX","AMAT","MRVL","MU","INTC","AMD","QCOM","ORCL","NOW"],
+  "🔥 High Volume Tech": ["AAPL","MSFT","NVDA","AMD","INTC","TSLA","AMZN","META","GOOGL","NFLX","SHOP","SQ","PYPL","COIN","MELI","UBER","ABNB","RBLX","SPOT","NOW","SNOW","PANW","CRWD","ZS","DDOG","NET","TEAM","OKTA","ADBE","CRM","ORCL","IBM","QCOM","AVGO","AMAT","LRCX","KLAC","MU","MRVL","TXN","ADI"],
+  "💊 Biotech/Health": ["UNH","JNJ","LLY","ABBV","MRK","ABT","TMO","MDT","BMY","PFE","MRNA","BNTX","BIIB","ILMN","GILD","AMGN","REGN","VRTX","IQV","LH","DGX","HCA","CNC","MOH","HUM","ELV","SYK","EW","ISRG","ZTS"],
+  "🏦 Financials": ["JPM","BAC","WFC","GS","MS","C","BLK","AXP","V","MA","PNC","USB","TFC","COF","DFS","SYF","ALLY","ICE","CME","SPGI","MMC","AON","CB","PLD","AMT","CCI","EQIX"],
+  "⚡ Russell Liquid >$20 >700k": ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","JPM","V","UNH","XOM","LLY","JNJ","WMT","MA","PG","AVGO","HD","CVX","MRK","ABBV","COST","PEP","KO","ADBE","WFC","CRM","TMO","ACN","MCD","CSCO","ABT","GE","BAC","LIN","DHR","TXN","NEE","PM","RTX","AMGN","IBM","INTU","UPS","CAT","SPGI","LOW","GS","ISRG","BKNG","SYK","VRTX","BLK","AXP","MDT","GILD","ADI","MS","REGN","TJX","CME","ZTS","C","DUK","SO","PNC","USB","ICE","NOC","ITW","EOG","SLB","FDX","PSX","EMR","MPC","VLO","FCX","NEM","WM","F","GM","HON","GD","LMT","NSC","CSX","UNP","DE","APD","KLAC","LRCX","AMAT","MRVL","MU","INTC","AMD","QCOM","ORCL","NOW","SNOW","PANW","CRWD","DDOG","NET","SHOP","PYPL","COIN","MELI","UBER","ABNB","NFLX","DIS","CMCSA","T","VZ","TMUS","AMT","CCI","EQIX","OKE","WMB","KMI","OXY","HAL","DVN","MRO","CLF","NUE","STLD","DOW","SHW","CARR","ROK","PH","CTAS","FAST","ODFL","JBHT","CMG","SBUX","MCD","DRI","HCA","CNC","HUM","BMY","PFE","MRNA","BIIB","ILMN","IQV","COF","DFS","ALLY","SPY","QQQ","IWM","XLF","XLK","XLE","XLV","XLY","BA","DAL","UAL","AAL","LUV","CCL","RCL","MGM","WYNN","LVS","PENN","DKNG","NKE","TGT","COST","DG","DLTR","ETSY","W","ROKU","TTD","ENPH","FSLR","NLY","AGNC"],
+};
+
 // ─── SOUND ENGINE ─────────────────────────────────────────────────────────────
 function playAlertSound(type="signal") {
   try {
@@ -1996,6 +2005,30 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
   );
 }
 
+// ─── POLYGON LIVE PRE-FILTER ──────────────────────────────────────────────────
+async function filterByPriceVolume(symbols, minPrice=20, minVolume=700000, onProgress=null) {
+  const syms = symbols.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
+  const BATCH = 100; // Polygon snapshot supports up to 100 tickers
+  const passing = [];
+  for(let b=0; b<syms.length; b+=BATCH){
+    const batch = syms.slice(b, b+BATCH);
+    try {
+      const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${batch.join(",")}&apiKey=${API_KEY}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if(json.tickers){
+        json.tickers.forEach(t=>{
+          const price = t.day?.c || t.prevDay?.c || 0;
+          const volume = t.day?.v || t.prevDay?.v || 0;
+          if(price >= minPrice && volume >= minVolume) passing.push(t.ticker);
+        });
+      }
+    } catch(e){}
+    if(onProgress) onProgress(Math.min(b+BATCH, syms.length), syms.length);
+  }
+  return passing;
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
   const [symbols,setSymbols]=useState(()=>{
@@ -2011,6 +2044,23 @@ export default function App(){
   const [logVersion,setLogVersion]=useState(0);
   const [flashAlert,setFlashAlert]=useState(null);
   const [chartSym,setChartSym]=useState("SPY");
+  const [filtering,setFiltering]=useState(false);
+  const [filterProg,setFilterProg]=useState(null);
+  const [minPrice,setMinPrice]=useState(20);
+  const [minVol,setMinVol]=useState(700000);
+
+  const runFilter = async () => {
+    setFiltering(true); setFilterProg("Fetching snapshots...");
+    try {
+      const passing = await filterByPriceVolume(symbols, minPrice, minVol, (done,total)=>{
+        setFilterProg(`Checking ${done}/${total}...`);
+      });
+      updateSymbols(passing.join(","));
+      setFilterProg(`✅ ${passing.length} stocks passed filter`);
+      setTimeout(()=>setFilterProg(null), 3000);
+    } catch(e){ setFilterProg("❌ Filter failed"); setTimeout(()=>setFilterProg(null),3000); }
+    setFiltering(false);
+  };
 
   const updateSymbols=(val)=>{
     setSymbols(val);
@@ -2055,10 +2105,31 @@ export default function App(){
           <span style={{fontSize:10,color:"#ff9800",padding:"2px 8px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
           {flashAlert&&<span style={{fontSize:11,color:"#ff9800",fontWeight:700,animation:"pulse 0.5s infinite"}}>🚨 SIGNAL FIRED!</span>}
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:600}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:700,flexWrap:"wrap"}}>
           <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1,whiteSpace:"nowrap"}}>WATCHLIST</span>
+          {/* Preset dropdown */}
+          <select onChange={e=>{if(e.target.value)updateSymbols(WATCHLIST_PRESETS[e.target.value].join(","));e.target.value="";}}
+            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
+            <option value="">📋 Load Preset...</option>
+            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k} ({WATCHLIST_PRESETS[k].length})</option>)}
+          </select>
           <input value={symbols} onChange={e=>updateSymbols(e.target.value)}
-            style={{flex:1,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+            style={{flex:1,minWidth:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length} stocks</span>
+          {/* Live filter */}
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
+              style={{width:45,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:9,color:"#2a5a7a"}}>$ min</span>
+            <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
+              style={{width:65,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:9,color:"#2a5a7a"}}>vol min</span>
+            <button onClick={runFilter} disabled={filtering}
+              style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+              {filtering?"⏳ "+filterProg:"🔍 FILTER"}
+            </button>
+            {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
+          </div>
         </div>
       </div>
 
