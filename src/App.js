@@ -948,8 +948,421 @@ function BondoFund() {
   );
 }
 
+// ─── CHART TAB ────────────────────────────────────────────────────────────────
+function ChartTab({trades, initialSym}) {
+  const [chartSym, setChartSym] = useState(initialSym||"SPY");
+  const [inputSym, setInputSym] = useState(initialSym||"SPY");
+  const [tf, setTf] = useState({label:"15m",mult:15,span:"minute"});
+  const [candles, setCandles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedTrade, setSelectedTrade] = useState(null);
+  const [livePrice, setLivePrice] = useState(null);
+  const [macdData, setMacdData] = useState([]);
+  const [rsiData, setRsiData] = useState([]);
+  const [htData, setHtData] = useState({up:[],down:[]});
+
+  const chartContainerRef = useRef(null);
+  const lwChartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const volSeriesRef = useRef(null);
+  const ema50Ref = useRef(null);
+  const ema100Ref = useRef(null);
+  const ema200Ref = useRef(null);
+  const macdCanvasRef = useRef(null);
+  const rsiCanvasRef = useRef(null);
+  const autoTimerRef = useRef(null);
+
+  const closedTrades = trades.filter(t=>t.pnl!==null);
+  const openTrades = trades.filter(t=>t.pnl===null);
+
+  const TF_OPTIONS = [
+    {label:"1m",  mult:1,  span:"minute"},
+    {label:"2m",  mult:2,  span:"minute"},
+    {label:"3m",  mult:3,  span:"minute"},
+    {label:"5m",  mult:5,  span:"minute"},
+    {label:"15m", mult:15, span:"minute"},
+    {label:"30m", mult:30, span:"minute"},
+    {label:"1H",  mult:1,  span:"hour"},
+    {label:"4H",  mult:4,  span:"hour"},
+    {label:"1D",  mult:1,  span:"day"},
+  ];
+
+  const calcEMA = (data, period) => {
+    const k=2/(period+1); let ema=data[0]?.close||0;
+    return data.map((d,i)=>{ ema=i===0?d.close:d.close*k+ema*(1-k); return {time:d.time,value:parseFloat(ema.toFixed(4))}; });
+  };
+
+  const calcHalfTrend = (data, amp=2) => {
+    const upMarkers=[], downMarkers=[];
+    let trend=0, maxLow=data[0]?.low||0, minHigh=data[0]?.high||0;
+    data.forEach((d,i,arr)=>{
+      const slice=arr.slice(Math.max(0,i-amp),i+1);
+      const highP=Math.max(...slice.map(x=>x.high));
+      const lowP=Math.min(...slice.map(x=>x.low));
+      const atrSlice=arr.slice(Math.max(0,i-13),i+1);
+      const atr=atrSlice.reduce((s,x,j,a)=>s+(j===0?x.high-x.low:Math.max(x.high-x.low,Math.abs(x.high-a[j-1].close),Math.abs(x.low-a[j-1].close))),0)/atrSlice.length*amp;
+      if(trend===0){
+        maxLow=Math.max(maxLow,lowP);
+        if(d.close<maxLow-atr){ trend=1; minHigh=highP; }
+        else upMarkers.push({time:d.time,position:"belowBar",color:"#00e676",shape:"arrowUp",size:0.7});
+      } else {
+        minHigh=Math.min(minHigh,highP);
+        if(d.close>minHigh+atr){ trend=0; maxLow=lowP; }
+        else downMarkers.push({time:d.time,position:"aboveBar",color:"#ff1744",shape:"arrowDown",size:0.7});
+      }
+    });
+    return {up:upMarkers,down:downMarkers};
+  };
+
+  const calcMACD = (data) => {
+    const k12=2/13,k26=2/27,k9=2/10;
+    let e12=data[0]?.close||0,e26=data[0]?.close||0,sig=0;
+    return data.map((d,i)=>{
+      e12=i===0?d.close:d.close*k12+e12*(1-k12);
+      e26=i===0?d.close:d.close*k26+e26*(1-k26);
+      const macd=e12-e26; sig=i===0?macd:macd*k9+sig*(1-k9);
+      return {time:d.time,macd:parseFloat(macd.toFixed(4)),signal:parseFloat(sig.toFixed(4)),hist:parseFloat((macd-sig).toFixed(4))};
+    });
+  };
+
+  const calcRSI = (data,period=14) => {
+    let ag=0,al=0; const res=[];
+    for(let i=1;i<data.length;i++){
+      const diff=data[i].close-data[i-1].close;
+      if(i<=period){ ag+=(diff>0?diff:0)/period; al+=(diff<0?-diff:0)/period; }
+      else{ ag=(ag*(period-1)+(diff>0?diff:0))/period; al=(al*(period-1)+(diff<0?-diff:0))/period; }
+      if(i>=period){ const rs=al===0?100:ag/al; res.push({time:data[i].time,value:parseFloat((100-100/(1+rs)).toFixed(2))}); }
+    }
+    return res;
+  };
+
+  const fetchCandles = async (sym, timeframe) => {
+    setLoading(true); setError("");
+    try {
+      const now=new Date();
+      const daysBack=timeframe.span==="day"?365:timeframe.span==="hour"?30:5;
+      const from=new Date(now-daysBack*86400000).toISOString().split("T")[0];
+      const to=now.toISOString().split("T")[0];
+      const url=`https://api.polygon.io/v2/aggs/ticker/${sym}/range/${timeframe.mult}/${timeframe.span}/${from}/${to}?adjusted=true&sort=asc&limit=5000&apiKey=${API_KEY}`;
+      const res=await fetch(url);
+      const json=await res.json();
+      if(!json.results||json.results.length===0){ setError(`No data for ${sym}`); setLoading(false); return; }
+      const data=json.results.map(r=>({
+        time:Math.floor(r.t/1000),
+        open:r.o, high:r.h, low:r.l, close:r.c, volume:r.v
+      }));
+      setCandles(data);
+      setLivePrice(data[data.length-1].close);
+      const macd=calcMACD(data); setMacdData(macd);
+      const rsi=calcRSI(data); setRsiData(rsi);
+      const ht=calcHalfTrend(data); setHtData(ht);
+      updateLWChart(data, ht, sym);
+    } catch(e){ setError("Fetch error: "+e.message); }
+    setLoading(false);
+  };
+
+  const updateLWChart = (data, ht, sym) => {
+    if(!lwChartRef.current) return;
+    const chart=lwChartRef.current;
+    candleSeriesRef.current.setData(data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close})));
+    volSeriesRef.current.setData(data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?"rgba(0,230,118,0.4)":"rgba(255,23,68,0.4)"})));
+    ema50Ref.current.setData(calcEMA(data,50));
+    ema100Ref.current.setData(calcEMA(data,100));
+    ema200Ref.current.setData(calcEMA(data,200));
+    // HalfTrend markers
+    const allMarkers=[...ht.up,...ht.down].sort((a,b)=>a.time-b.time);
+    candleSeriesRef.current.setMarkers(allMarkers);
+    chart.timeScale().fitContent();
+  };
+
+  // Draw entry/exit lines on chart
+  const drawTradeLevels = (trade) => {
+    if(!candleSeriesRef.current||!lwChartRef.current) return;
+    const chart=lwChartRef.current;
+    // Remove old price lines
+    try{ if(chart._entryLine) candleSeriesRef.current.removePriceLine(chart._entryLine); } catch(e){}
+    try{ if(chart._exitLine) candleSeriesRef.current.removePriceLine(chart._exitLine); } catch(e){}
+    if(!trade){ return; }
+    chart._entryLine=candleSeriesRef.current.createPriceLine({price:trade.entry,color:"#ffeb3b",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`ENTRY $${trade.entry}`});
+    if(trade.exit) chart._exitLine=candleSeriesRef.current.createPriceLine({price:trade.exit,color:"#00e676",lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`EXIT $${trade.exit}`});
+  };
+
+  // Draw MACD canvas
+  const drawMACD = () => {
+    const canvas=macdCanvasRef.current; if(!canvas||macdData.length===0) return;
+    const ctx=canvas.getContext("2d"); const W=canvas.width,H=canvas.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle="#080e1a"; ctx.fillRect(0,0,W,H);
+    // Labels
+    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("MACD",6,12);
+    const visible=macdData.slice(-120);
+    if(visible.length===0) return;
+    const hists=visible.map(d=>d.hist);
+    const maxH=Math.max(...hists.map(Math.abs))||1;
+    const midY=H/2; const barW=Math.max(1,(W-20)/visible.length);
+    visible.forEach((d,i)=>{
+      const h=(d.hist/maxH)*(midY-15);
+      ctx.fillStyle=d.hist>=0?"rgba(0,230,118,0.8)":"rgba(255,23,68,0.8)";
+      ctx.fillRect(20+i*barW, h>=0?midY-h:midY, Math.max(1,barW-1), Math.abs(h)||1);
+    });
+    // MACD & Signal lines
+    const drawLine=(arr,color,key)=>{
+      ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.beginPath();
+      arr.forEach((d,i)=>{ const x=20+i*barW+barW/2; const y=midY-(d[key]/maxH)*(midY-15); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+      ctx.stroke();
+    };
+    drawLine(visible,"#00b4d8","macd"); drawLine(visible,"#ff9800","signal");
+    // Zero line
+    ctx.strokeStyle="#1e3a5a"; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(20,midY); ctx.lineTo(W,midY); ctx.stroke(); ctx.setLineDash([]);
+    // Current values
+    const last=visible[visible.length-1];
+    const col=last.hist>=0?"#00e676":"#ff1744";
+    ctx.fillStyle=col; ctx.font="9px monospace";
+    ctx.fillText(`H:${last.hist.toFixed(3)}`,W-90,12);
+    ctx.fillStyle="#00b4d8"; ctx.fillText(`M:${last.macd.toFixed(3)}`,W-90,22);
+    ctx.fillStyle="#ff9800"; ctx.fillText(`S:${last.signal.toFixed(3)}`,W-90,32);
+  };
+
+  // Draw RSI canvas
+  const drawRSI = () => {
+    const canvas=rsiCanvasRef.current; if(!canvas||rsiData.length===0) return;
+    const ctx=canvas.getContext("2d"); const W=canvas.width,H=canvas.height;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle="#080e1a"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#3a6e9a"; ctx.font="10px monospace"; ctx.fillText("RSI(14)",6,12);
+    const visible=rsiData.slice(-120);
+    if(visible.length===0) return;
+    const toY=v=>H-4-((v/100)*(H-8));
+    const barW=(W-20)/visible.length;
+    // OB/OS zones
+    ctx.fillStyle="rgba(255,23,68,0.07)"; ctx.fillRect(20,toY(70),W-20,toY(30)-toY(70));
+    // Lines at 70/30/50
+    [[70,"#ff174440"],[50,"#1e3a5a"],[30,"#00e67640"]].forEach(([v,c])=>{
+      ctx.strokeStyle=c; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(20,toY(v)); ctx.lineTo(W,toY(v)); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    // RSI line
+    ctx.strokeStyle="#e040fb"; ctx.lineWidth=1.5; ctx.beginPath();
+    visible.forEach((d,i)=>{ const x=20+i*barW+barW/2; const y=toY(d.value); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.stroke();
+    // Labels
+    ctx.fillStyle="#ff1744"; ctx.font="8px monospace"; ctx.fillText("70",2,toY(70)+4);
+    ctx.fillStyle="#3a6e9a"; ctx.fillText("50",2,toY(50)+4);
+    ctx.fillStyle="#00e676"; ctx.fillText("30",2,toY(30)+4);
+    const last=rsiData[rsiData.length-1];
+    if(last){ const col=last.value>70?"#ff1744":last.value<30?"#00e676":"#e040fb"; ctx.fillStyle=col; ctx.font="bold 10px monospace"; ctx.fillText(last.value.toFixed(1),W-32,12); }
+  };
+
+  // Init Lightweight Charts
+  useEffect(()=>{
+    if(!chartContainerRef.current) return;
+    const script=document.createElement("script");
+    script.src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
+    script.onload=()=>{
+      if(lwChartRef.current) return;
+      const chart=window.LightweightCharts.createChart(chartContainerRef.current,{
+        width:chartContainerRef.current.clientWidth,
+        height:chartContainerRef.current.clientHeight,
+        layout:{background:{color:"#080e1a"},textColor:"#8ab4cc"},
+        grid:{vertLines:{color:"#0d1b2e"},horzLines:{color:"#0d1b2e"}},
+        crosshair:{mode:1},
+        rightPriceScale:{borderColor:"#1e3a5a"},
+        timeScale:{borderColor:"#1e3a5a",timeVisible:true,secondsVisible:false},
+      });
+      lwChartRef.current=chart;
+      candleSeriesRef.current=chart.addCandlestickSeries({upColor:"#00e676",downColor:"#ff1744",borderUpColor:"#00e676",borderDownColor:"#ff1744",wickUpColor:"#00e676",wickDownColor:"#ff1744"});
+      volSeriesRef.current=chart.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:"vol",scaleMargins:{top:0.85,bottom:0}});
+      ema50Ref.current=chart.addLineSeries({color:"#00b4d8",lineWidth:1,title:"EMA50"});
+      ema100Ref.current=chart.addLineSeries({color:"#ff9800",lineWidth:1,title:"EMA100"});
+      ema200Ref.current=chart.addLineSeries({color:"#e040fb",lineWidth:1,title:"EMA200"});
+      const ro=new ResizeObserver(entries=>{ for(const e of entries) chart.resize(e.contentRect.width,e.contentRect.height); });
+      ro.observe(chartContainerRef.current);
+      fetchCandles(chartSym,tf);
+    };
+    document.head.appendChild(script);
+    return ()=>{ if(lwChartRef.current){ lwChartRef.current.remove(); lwChartRef.current=null; } };
+  },[]);
+
+  // Redraw indicator canvases when data changes
+  useEffect(()=>{ drawMACD(); },[macdData]);
+  useEffect(()=>{ drawRSI(); },[rsiData]);
+
+  // When selectedTrade changes, draw lines
+  useEffect(()=>{ drawTradeLevels(selectedTrade); },[selectedTrade,candles]);
+
+  // Reload chart when symbol or timeframe changes (after init)
+  useEffect(()=>{
+    if(lwChartRef.current) fetchCandles(chartSym,tf);
+  },[chartSym,tf]);
+
+  // Auto-refresh every 60s
+  useEffect(()=>{
+    if(autoTimerRef.current) clearInterval(autoTimerRef.current);
+    autoTimerRef.current=setInterval(()=>{ if(lwChartRef.current) fetchCandles(chartSym,tf); },60000);
+    return ()=>clearInterval(autoTimerRef.current);
+  },[chartSym,tf]);
+
+  const reviewTrade=(t)=>{ setSelectedTrade(t); setChartSym(t.symbol); setInputSym(t.symbol); };
+  const pnlColor=(pnl)=>pnl===null?"#ffeb3b":parseFloat(pnl)>=0?"#00e676":"#ff1744";
+  const dirColor=(d)=>["BUY","BUY CALL","SELL PUT","COVER"].includes(d)?"#00e676":"#ff1744";
+
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",background:"#080e1a",overflow:"hidden"}}>
+      {/* TOP CONTROLS */}
+      <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"8px 14px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",flexShrink:0}}>
+        <input value={inputSym} onChange={e=>setInputSym(e.target.value.toUpperCase())}
+          onKeyDown={e=>e.key==="Enter"&&setChartSym(inputSym)}
+          style={{width:90,background:"#0d1b2e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",
+            padding:"6px 8px",fontSize:14,fontFamily:"inherit",outline:"none",fontWeight:700,textAlign:"center"}}/>
+        <button onClick={()=>setChartSym(inputSym)} style={{padding:"6px 12px",background:"#0d3b5e",border:"1px solid #00b4d8",
+          borderRadius:4,color:"#00b4d8",fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>
+          LOAD ↵
+        </button>
+        <div style={{width:1,height:20,background:"#1e3a5a"}}/>
+        {TF_OPTIONS.map(t=>(
+          <button key={t.label} onClick={()=>setTf(t)} style={{padding:"4px 8px",
+            background:tf.label===t.label?"#0d3b5e":"transparent",
+            border:`1px solid ${tf.label===t.label?"#00b4d8":"#1e3a5a"}`,
+            color:tf.label===t.label?"#00b4d8":"#3a6e9a",
+            borderRadius:3,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:tf.label===t.label?700:400}}>
+            {t.label}
+          </button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+          {loading&&<span style={{fontSize:10,color:"#ff9800"}}>⟳ Loading...</span>}
+          {error&&<span style={{fontSize:10,color:"#ff1744"}}>⚠ {error}</span>}
+          {livePrice&&!loading&&<span style={{fontSize:16,fontWeight:700,color:"#e8f4ff"}}>{chartSym} <span style={{color:"#00e676"}}>${livePrice.toFixed(2)}</span></span>}
+        </div>
+      </div>
+
+      {/* MAIN AREA */}
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* CHART COLUMN */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+          {/* Main candlestick chart */}
+          <div ref={chartContainerRef} style={{flex:1,minHeight:0}}/>
+          {/* MACD Panel */}
+          <div style={{height:80,flexShrink:0,borderTop:"1px solid #1e3a5a",position:"relative"}}>
+            <canvas ref={macdCanvasRef} width={800} height={80} style={{width:"100%",height:"100%"}}/>
+          </div>
+          {/* RSI Panel */}
+          <div style={{height:70,flexShrink:0,borderTop:"1px solid #1e3a5a",position:"relative"}}>
+            <canvas ref={rsiCanvasRef} width={800} height={70} style={{width:"100%",height:"100%"}}/>
+          </div>
+        </div>
+
+        {/* RIGHT PANEL */}
+        <div style={{width:250,minWidth:250,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Selected trade */}
+          {selectedTrade&&(
+            <div style={{padding:"10px",borderBottom:"1px solid #1e3a5a",flexShrink:0}}>
+              <div style={{fontSize:9,color:"#ff9800",fontWeight:700,letterSpacing:1,marginBottom:6}}>🔍 REVIEWING: {selectedTrade.symbol}</div>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                <span style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{selectedTrade.symbol}</span>
+                <span style={{fontSize:9,fontWeight:700,color:dirColor(selectedTrade.direction),padding:"2px 5px",border:`1px solid ${dirColor(selectedTrade.direction)}`,borderRadius:3}}>{selectedTrade.direction}</span>
+              </div>
+              {/* Price levels */}
+              <div style={{background:"#0d1b2e",borderRadius:5,padding:"8px",marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:9,color:"#2a5a7a"}}>── ENTRY</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"#ffeb3b"}}>${selectedTrade.entry}</span>
+                </div>
+                {selectedTrade.exit&&(
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:9,color:"#2a5a7a"}}>── EXIT</span>
+                    <span style={{fontSize:13,fontWeight:700,color:"#00e676"}}>${selectedTrade.exit}</span>
+                  </div>
+                )}
+                {!selectedTrade.exit&&<div style={{fontSize:9,color:"#ffeb3b",textAlign:"center",marginTop:4}}>⚡ POSITION OPEN</div>}
+              </div>
+              {/* P&L */}
+              <div style={{padding:"8px",background:selectedTrade.pnl>=0?"#051a05":"#1a0505",border:`1px solid ${pnlColor(selectedTrade.pnl)}`,borderRadius:5,marginBottom:6,textAlign:"center"}}>
+                <div style={{fontSize:18,fontWeight:700,color:pnlColor(selectedTrade.pnl)}}>
+                  {selectedTrade.pnl!==null?`${parseFloat(selectedTrade.pnl)>=0?"+":""}$${parseFloat(selectedTrade.pnl).toFixed(2)}`:"OPEN"}
+                </div>
+                {selectedTrade.pnl!==null&&selectedTrade.pnl<0&&<div style={{fontSize:9,color:"#ff5722",marginTop:3}}>⚠️ Did setup match chart?</div>}
+                {selectedTrade.pnl!==null&&selectedTrade.pnl>=0&&<div style={{fontSize:9,color:"#00e676",marginTop:3}}>✅ Profitable!</div>}
+              </div>
+              {/* Chart Alignment Checklist */}
+              <div style={{background:"#0d1b2e",borderRadius:5,padding:"8px",marginBottom:6}}>
+                <div style={{fontSize:9,color:"#3a6e9a",fontWeight:700,marginBottom:5}}>CHART ALIGNMENT CHECK</div>
+                {[["HalfTrend matched?","ht"],["EMA compression?","ema"],["MACD confirmed?","macd"],["RSI not extreme?","rsi"],["Volume confirmed?","vol"]].map(([label,key])=>{
+                  const val=(selectedTrade.checks||{})[key];
+                  const mk=(v)=>{
+                    const updated=trades.map(t=>t.id===selectedTrade.id?{...t,checks:{...(t.checks||{}),[key]:v}}:t);
+                    saveBondoFund(updated); setSelectedTrade(prev=>({...prev,checks:{...(prev.checks||{}),[key]:v}}));
+                  };
+                  return (
+                    <div key={key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                      <span style={{fontSize:9,color:"#8ab4cc"}}>{label}</span>
+                      <div style={{display:"flex",gap:3}}>
+                        <button onClick={()=>mk(true)} style={{padding:"2px 7px",background:val===true?"#0a2a0a":"#0d1b2e",border:`1px solid ${val===true?"#00e676":"#1e3a5a"}`,borderRadius:3,color:val===true?"#00e676":"#3a6e9a",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>✓</button>
+                        <button onClick={()=>mk(false)} style={{padding:"2px 7px",background:val===false?"#2a0a0a":"#0d1b2e",border:`1px solid ${val===false?"#ff1744":"#1e3a5a"}`,borderRadius:3,color:val===false?"#ff1744":"#3a6e9a",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>✗</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {selectedTrade.checks&&(()=>{
+                  const yes=Object.values(selectedTrade.checks).filter(v=>v===true).length;
+                  const tot=Object.values(selectedTrade.checks).length;
+                  const score=tot>0?Math.round(yes/tot*100):0;
+                  const col=score>=80?"#00e676":score>=60?"#ff9800":"#ff1744";
+                  return(<div style={{marginTop:6,textAlign:"center"}}>
+                    <span style={{fontSize:14,fontWeight:700,color:col}}>{score}%</span>
+                    <span style={{fontSize:9,color:"#3a6e9a"}}> setup quality</span>
+                    <div style={{background:"#080e1a",borderRadius:3,height:4,marginTop:4,overflow:"hidden"}}><div style={{width:`${score}%`,height:"100%",background:col,transition:"width 0.5s"}}/></div>
+                  </div>);
+                })()}
+              </div>
+              <button onClick={()=>setSelectedTrade(null)} style={{width:"100%",padding:"4px",background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#3a6e9a",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>✕ Close</button>
+            </div>
+          )}
+
+          {/* Trade list */}
+          <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
+            <div style={{fontSize:9,color:"#3a6e9a",fontWeight:700,letterSpacing:1,marginBottom:6}}>📋 CLICK TO REVIEW ON CHART</div>
+            {trades.length===0&&<div style={{textAlign:"center",padding:"20px",color:"#2a5a7a",fontSize:10}}>No trades yet.<br/>Log trades in 🏦 BONDO FUND.</div>}
+            {openTrades.length>0&&<div style={{fontSize:8,color:"#ffeb3b",letterSpacing:1,marginBottom:4}}>⚡ OPEN POSITIONS</div>}
+            {openTrades.map(t=>(
+              <div key={t.id} onClick={()=>reviewTrade(t)} style={{padding:"7px 9px",marginBottom:4,
+                background:selectedTrade?.id===t.id?"#0d3b5e":"#0d1b2e",
+                border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":"#1e5a3a"}`,
+                borderRadius:4,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{t.symbol}</span>
+                  <span style={{fontSize:9,color:"#ffeb3b",fontWeight:700}}>OPEN</span>
+                </div>
+                <div style={{fontSize:9,color:dirColor(t.direction)}}>{t.direction} · ${t.entry}</div>
+              </div>
+            ))}
+            {closedTrades.length>0&&<div style={{fontSize:8,color:"#3a6e9a",letterSpacing:1,marginBottom:4,marginTop:6}}>✅ CLOSED</div>}
+            {closedTrades.map(t=>(
+              <div key={t.id} onClick={()=>reviewTrade(t)} style={{padding:"7px 9px",marginBottom:4,
+                background:selectedTrade?.id===t.id?"#0d3b5e":parseFloat(t.pnl)>=0?"#051a05":"#1a0505",
+                border:`1px solid ${selectedTrade?.id===t.id?"#00b4d8":parseFloat(t.pnl)>=0?"#1e5a3a":"#5a1e1e"}`,
+                borderRadius:4,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{t.symbol}</span>
+                  <span style={{fontSize:11,fontWeight:700,color:pnlColor(t.pnl)}}>{parseFloat(t.pnl)>=0?"+":""}${parseFloat(t.pnl).toFixed(0)}</span>
+                </div>
+                <div style={{fontSize:9,color:dirColor(t.direction)}}>{t.direction}</div>
+                <div style={{fontSize:9,color:"#3a6e9a"}}>${t.entry} → ${t.exit}</div>
+                {t.checks&&(()=>{const y=Object.values(t.checks).filter(v=>v===true).length,tot=Object.values(t.checks).length,sc=tot>0?Math.round(y/tot*100):null; return sc!==null?<div style={{fontSize:8,color:sc>=80?"#00e676":sc>=60?"#ff9800":"#ff1744"}}>Setup: {sc}% aligned</div>:null;})()}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ─── EMA SCANNER ──────────────────────────────────────────────────────────────
-function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion}){
+function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion, goToChart}){
   const [ema1,setEma1]=useState(50);
   const [ema2,setEma2]=useState(100);
   const [ema3,setEma3]=useState(200);
@@ -1089,7 +1502,14 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion}
                   const isSel=selRow===i;
                   const bg=isSel?"#0d2a3e":r.swingSignal?"#1a0a1a":r.allSlopingDown&&r.compressed?"#1a0a0a":r.allSlopingUp&&r.compressed?"#0a1a0a":i%2===0?"#080e1a":"#0a1218";
                   return <tr key={r.symbol} onClick={()=>setSelRow(isSel?null:i)} style={{background:bg,borderBottom:"1px solid #0f1e2e",cursor:"pointer"}}>
-                    <td style={{padding:"6px 7px",fontWeight:700,color:"#e8f4ff",fontSize:12}}>{r.symbol}</td>
+                    <td style={{padding:"6px 7px",fontWeight:700,color:"#e8f4ff",fontSize:12}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        {r.symbol}
+                        <button onClick={e=>{e.stopPropagation();goToChart&&goToChart(r.symbol);}} title="View on Chart"
+                          style={{padding:"1px 5px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:3,
+                          color:"#00b4d8",fontSize:9,cursor:"pointer",fontFamily:"inherit",lineHeight:1.4}}>📈</button>
+                      </div>
+                    </td>
                     <td style={{padding:"6px 7px",color:"#c9d8e8"}}>{r.price}</td>
                     <td style={{padding:"6px 7px",color:"#00b4d8"}}>{r.ema1}</td>
                     <td style={{padding:"6px 7px",color:"#00b4d8"}}>{r.ema2}</td>
@@ -1136,7 +1556,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion}
 }
 
 // ─── HALFTREND MTF SCANNER ────────────────────────────────────────────────────
-function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion}){
+function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion, goToChart}){
   const [tf1,setTf1]=useState("1h");
   const [tf2,setTf2]=useState("15m");
   const [tf3,setTf3]=useState("5m");
@@ -1274,7 +1694,14 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                 {results.map((r,i)=>{
                   const bg=r.aligned?(direction==="SELL"?"#1a0505":"#051a05"):r.matchCount>=3?"#110a05":i%2===0?"#080e1a":"#0a1218";
                   return <tr key={r.symbol} style={{background:bg,borderBottom:"1px solid #0f1e2e"}}>
-                    <td style={{padding:"7px 8px",fontWeight:700,color:"#e8f4ff",fontSize:13}}>{r.symbol}</td>
+                    <td style={{padding:"7px 8px",fontWeight:700,color:"#e8f4ff",fontSize:13}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        {r.symbol}
+                        <button onClick={e=>{e.stopPropagation();goToChart&&goToChart(r.symbol);}} title="View on Chart"
+                          style={{padding:"1px 5px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:3,
+                          color:"#00b4d8",fontSize:9,cursor:"pointer",fontFamily:"inherit",lineHeight:1.4}}>📈</button>
+                      </div>
+                    </td>
                     <td style={{padding:"7px 8px",color:"#c9d8e8"}}>{r.price}</td>
                     {[r.r1,r.r2,r.r3,r.r4].map((ht,j)=><td key={j} style={{padding:"7px 8px"}}><HTBadge result={ht}/></td>)}
                     <td style={{padding:"7px 8px"}}>
@@ -1308,7 +1735,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
 }
 
 // ─── SHA + HALFTREND MTF SCANNER ──────────────────────────────────────────────
-function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion}){
+function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion, goToChart}){
   const [tf1,setTf1]=useState("1h");
   const [tf2,setTf2]=useState("15m");
   const [tf3,setTf3]=useState("5m");
@@ -1455,7 +1882,14 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
                 {results.map((r,i)=>{
                   const bg=r.fullyAligned?(direction==="SELL"?"#1a0514":"#051a0a"):r.matchCount>=3?"#110a0e":i%2===0?"#080e1a":"#0a1218";
                   return <tr key={r.symbol} style={{background:bg,borderBottom:"1px solid #0f1e2e"}}>
-                    <td style={{padding:"7px 8px",fontWeight:700,color:"#e8f4ff",fontSize:13}}>{r.symbol}</td>
+                    <td style={{padding:"7px 8px",fontWeight:700,color:"#e8f4ff",fontSize:13}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        {r.symbol}
+                        <button onClick={e=>{e.stopPropagation();goToChart&&goToChart(r.symbol);}} title="View on Chart"
+                          style={{padding:"1px 5px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:3,
+                          color:"#00b4d8",fontSize:9,cursor:"pointer",fontFamily:"inherit",lineHeight:1.4}}>📈</button>
+                      </div>
+                    </td>
                     <td style={{padding:"7px 8px",color:"#c9d8e8"}}>{r.price}</td>
                     {[r.r1,r.r2,r.r3,r.r4].map((res,j)=><td key={j} style={{padding:"6px 6px"}}><SHAHTBadge result={res}/></td>)}
                     <td style={{padding:"7px 8px"}}>
@@ -1506,6 +1940,7 @@ export default function App(){
   const [soundOn,setSoundOn]=useState(true);
   const [logVersion,setLogVersion]=useState(0);
   const [flashAlert,setFlashAlert]=useState(null);
+  const [chartSym,setChartSym]=useState("SPY");
 
   const updateSymbols=(val)=>{
     setSymbols(val);
@@ -1515,6 +1950,8 @@ export default function App(){
     setActiveTab(id);
     try { localStorage.setItem("alo_tab",id); } catch(e){}
   };
+
+  const goToChart=(sym)=>{ setChartSym(sym); updateTab("chart"); };
 
   const handleSignal = useCallback(()=>{
     setLogVersion(n=>n+1);
@@ -1533,9 +1970,10 @@ export default function App(){
     {id:"ht",label:"★ HALFTREND",color:"#e040fb"},
     {id:"shaht",label:"🔥 SHA+HT",color:"#ff9800"},
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
+    {id:"chart",label:"📈 CHART",color:"#ff9800"},
   ];
 
-  const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion};
+  const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion, goToChart};
 
   return(
     <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column"}}>
@@ -1581,6 +2019,11 @@ export default function App(){
           {activeTab==="pnl"&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
               <BondoFund/>
+            </div>
+          )}
+          {activeTab==="chart"&&(
+            <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+              <ChartTab trades={getBondoFundData()} initialSym={chartSym}/>
             </div>
           )}
         </div>
