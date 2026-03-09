@@ -2126,6 +2126,325 @@ async function filterByPriceVolume(symbols, minPrice=20, minVolume=700000, onPro
   return passing;
 }
 
+
+// ─── REVERSAL SCANNER ─────────────────────────────────────────────────────────
+async function analyzeReversal(symbol, tf) {
+  try {
+    const c = await fetchCandles(symbol, tf);
+    if(!c||c.closes.length<210) return null;
+
+    const closes = c.closes;
+    const highs  = c.highs;
+    const lows   = c.lows;
+    const n      = closes.length;
+    const price  = closes[n-1];
+
+    // ── 200 EMA ──
+    let ema200 = closes[0];
+    const k200 = 2/201;
+    for(let i=1;i<n;i++) ema200 = closes[i]*k200 + ema200*(1-k200);
+
+    // ── Distance from 200 EMA ──
+    const emaDist200 = parseFloat(((price - ema200)/ema200*100).toFixed(2));
+    const absEma200  = Math.abs(emaDist200);
+
+    // Only care if price is stretched >= 2% from 200 EMA
+    if(absEma200 < 2) return null;
+
+    // ── HalfTrend signal ──
+    const ht = calcHalfTrend(highs, lows, closes);
+    if(!ht) return null;
+
+    // ── Gap detection: compare last close to close 3 bars ago ──
+    const gapPct = parseFloat(((closes[n-1] - closes[n-4])/closes[n-4]*100).toFixed(2));
+    const absGap = Math.abs(gapPct);
+
+    // ── Reversal condition ──
+    // Gapped UP (price above 200 EMA) + HalfTrend now SELL = short reversal
+    // Gapped DOWN (price below 200 EMA) + HalfTrend now BUY = long reversal
+    const gappedUp   = emaDist200 > 2;
+    const gappedDown = emaDist200 < -2;
+    const htSell     = ht.trend === 1;
+    const htBuy      = ht.trend === 0;
+
+    const shortReversal = gappedUp   && htSell; // stretched above, now reversing down
+    const longReversal  = gappedDown && htBuy;  // stretched below, now reversing up
+
+    if(!shortReversal && !longReversal) return null;
+
+    const direction = shortReversal ? "SHORT" : "LONG";
+
+    // ── Strength score ──
+    const distScore  = absEma200>=5?40:absEma200>=3?25:10;
+    const gapScore   = absGap>=3?30:absGap>=1.5?20:10;
+    const freshScore = ht.candlesAgo<=2?30:ht.candlesAgo<=5?15:5;
+    const score      = distScore + gapScore + freshScore;
+
+    return {
+      symbol, price: price.toFixed(2), tf, direction,
+      emaDist200, absEma200, ema200: ema200.toFixed(2),
+      gapPct, candlesAgo: ht.candlesAgo,
+      sellSignal: ht.sellSignal, buySignal: ht.buySignal,
+      score, shortReversal, longReversal
+    };
+  } catch(e){ return null; }
+}
+
+function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion, goToChart}){
+  const [tf1,setTf1]     = useState("1h");
+  const [tf2,setTf2]     = useState("5m");
+  const [tf3,setTf3]     = useState("2m");
+  const [minDist,setMinDist] = useState(2);
+  const [direction,setDirection] = useState("BOTH");
+  const [results,setResults]   = useState([]);
+  const [scanning,setScanning] = useState(false);
+  const [prog,setProg]         = useState({done:0,total:0});
+  const [errors,setErrors]     = useState([]);
+  const [lastScan,setLastScan] = useState(null);
+  const [autoOn,setAutoOn]     = useState(false);
+  const [autoMin,setAutoMin]   = useState(5);
+  const prevRef = useRef(new Set());
+
+  const tfs = [tf1,tf2,tf3].filter(Boolean);
+
+  const runScan = useCallback(async()=>{
+    setScanning(true); setErrors([]);
+    const syms = symbols.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
+    setProg({done:0,total:syms.length});
+    const all=[], failed=[];
+    const BATCH=10;
+    for(let b=0;b<syms.length;b+=BATCH){
+      const batch=syms.slice(b,b+BATCH);
+      await Promise.all(batch.map(async sym=>{
+        try {
+          // Scan across all selected timeframes
+          const tfResults = await Promise.all(tfs.map(tf=>analyzeReversal(sym,tf)));
+          tfResults.forEach((r,i)=>{
+            if(!r) return;
+            if(r.absEma200 < minDist) return;
+            if(direction==="SHORT" && !r.shortReversal) return;
+            if(direction==="LONG"  && !r.longReversal)  return;
+            all.push({...r, tf:tfs[i]});
+          });
+        } catch(e){ failed.push(sym); }
+      }));
+      setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
+    }
+    // Sort by score desc
+    all.sort((a,b)=>b.score-a.score||b.absEma200-a.absEma200);
+
+    // Alerts
+    all.forEach(r=>{
+      const key=`${r.symbol}-${r.tf}-${r.direction}`;
+      if(!prevRef.current.has(key)){
+        prevRef.current.add(key);
+        onSignal && onSignal();
+        if(soundOn) playAlertSound("signal");
+        if(pushKey&&pushToken) sendPushover(pushKey,pushToken,
+          `🎯 REVERSAL: ${r.symbol} ${r.direction}`,
+          `TF: ${r.tf} | EMA Dist: ${r.emaDist200}% | Gap: ${r.gapPct}% | Score: ${r.score}`);
+      }
+    });
+    prevRef.current = new Set(all.map(r=>`${r.symbol}-${r.tf}-${r.direction}`));
+
+    setResults(all); setErrors(failed);
+    setScanning(false); setLastScan(getETTime());
+  },[symbols,tf1,tf2,tf3,direction,minDist,pushKey,pushToken,soundOn,onSignal]);
+
+  const nextIn = useAutoRefresh(runScan, autoOn, autoMin);
+  const shorts = results.filter(r=>r.shortReversal).length;
+  const longs  = results.filter(r=>r.longReversal).length;
+
+  return(
+    <div style={{display:"flex",flex:1,minHeight:0}}>
+      {/* LEFT PANEL */}
+      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+        <Section title="TIMEFRAMES">
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <TFInput label="TF1 (Gap chart)" value={tf1} onChange={setTf1}/>
+            <TFInput label="TF2 (Entry)" value={tf2} onChange={setTf2}/>
+            <TFInput label="TF3 (Fine entry)" value={tf3} onChange={setTf3}/>
+          </div>
+          <div style={{marginTop:8,padding:"8px",background:"#0d1b2e",borderRadius:4,border:"1px solid #1e3a5a"}}>
+            <div style={{fontSize:9,color:"#2a5a7a",marginBottom:5,fontWeight:700,letterSpacing:1}}>QUICK PRESETS</div>
+            {[["DAY",  "1d","1h","15m"],
+              ["SWING","1h","5m","2m"],
+              ["SCALP","5m","2m","30s"]].map(([label,a,b,c])=>(
+              <button key={label} onClick={()=>{setTf1(a);setTf2(b);setTf3(c);}}
+                style={{width:"100%",padding:"4px",marginBottom:4,background:"#0d1b2e",border:"1px solid #1e3a5a",color:"#3a6e9a",borderRadius:3,cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}}>
+                {label}: {a}/{b}/{c}
+              </button>))}
+          </div>
+        </Section>
+
+        <Section title="MIN EMA DISTANCE">
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <input type="number" min={1} max={20} step={0.5} value={minDist}
+              onChange={e=>setMinDist(parseFloat(e.target.value))}
+              style={{width:60,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"6px 8px",fontSize:14,fontFamily:"inherit",fontWeight:700,outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:11,color:"#3a6e9a"}}>% from 200 EMA</span>
+          </div>
+          <div style={{fontSize:9,color:"#2a5a7a",marginTop:4}}>Higher = more stretched = higher risk reversal</div>
+        </Section>
+
+        <Section title="DIRECTION">
+          <div style={{display:"flex",gap:6,flexDirection:"column"}}>
+            {[["BOTH","⇅ BOTH","#ffeb3b"],["SHORT","▼ SHORT REVERSAL","#ff1744"],["LONG","▲ LONG REVERSAL","#00e676"]].map(([d,label,col])=>(
+              <button key={d} onClick={()=>setDirection(d)} style={{padding:"8px",
+                background:direction===d?"#0d1b2e":"transparent",
+                border:`1px solid ${direction===d?col:"#1e3a5a"}`,
+                color:direction===d?col:"#3a6e9a",
+                borderRadius:4,cursor:"pointer",fontSize:11,fontFamily:"inherit",fontWeight:700}}>
+                {label}
+              </button>))}
+          </div>
+        </Section>
+
+        <Section title="AUTO-REFRESH">
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <input type="checkbox" checked={autoOn} onChange={e=>setAutoOn(e.target.checked)} id="rev_auto"/>
+            <label htmlFor="rev_auto" style={{fontSize:10,color:"#c9d8e8",cursor:"pointer"}}>⏱ Auto-Refresh</label>
+          </div>
+          {autoOn&&<>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+              <input type="number" min={1} max={60} value={autoMin} onChange={e=>setAutoMin(Number(e.target.value))}
+                style={{width:50,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#00b4d8",padding:"4px 6px",fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+              <span style={{fontSize:10,color:"#3a6e9a"}}>min interval</span>
+            </div>
+            {nextIn>0&&<div style={{fontSize:10,color:"#ffeb3b",fontWeight:700}}>⏳ Next: {nextIn}s</div>}
+          </>}
+        </Section>
+
+        <button onClick={runScan} disabled={scanning} style={{width:"100%",padding:"10px",
+          background:scanning?"#0d1b2e":"linear-gradient(135deg,#1a0d00,#2a1500)",
+          border:`1px solid ${scanning?"#1e3a5a":"#ff9800"}`,
+          color:scanning?"#3a6e9a":"#ff9800",
+          borderRadius:6,cursor:scanning?"not-allowed":"pointer",fontSize:12,fontFamily:"inherit",fontWeight:700,letterSpacing:2}}>
+          {scanning?`SCANNING ${prog.done}/${prog.total}...`:"🎯 SCAN REVERSALS"}
+        </button>
+        {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.slice(0,5).join(", ")}</div>}
+      </div>
+
+      {/* RIGHT PANEL */}
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <MarketBanner/>
+        {/* Stats bar */}
+        <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+          <Stat label="TOTAL" value={results.length}/>
+          <Stat label="▼ SHORT" value={shorts} color="#ff1744"/>
+          <Stat label="▲ LONG"  value={longs}  color="#00e676"/>
+          {lastScan&&<Stat label="SCANNED" value={lastScan} color="#ffeb3b"/>}
+          {autoOn&&nextIn>0&&<Stat label="NEXT IN" value={`${nextIn}s`} color="#ffeb3b"/>}
+          <div style={{marginLeft:"auto",fontSize:9,color:"#2a5a7a"}}>
+            Sorted by Score → EMA Distance
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div style={{background:"#080e1a",borderBottom:"1px solid #0f1e2e",padding:"6px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,color:"#3a6e9a"}}>🎯 = Fresh HalfTrend flip</span>
+          <span style={{fontSize:9,color:"#ff1744"}}>▼ SHORT = Gapped up + now selling</span>
+          <span style={{fontSize:9,color:"#00e676"}}>▲ LONG = Gapped down + now buying</span>
+          <span style={{fontSize:9,color:"#ffeb3b"}}>EMA DIST = How far from 200 EMA</span>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto"}}>
+          {results.length===0&&!scanning&&(
+            <div style={{textAlign:"center",padding:"60px",color:"#2a5a7a"}}>
+              <div style={{fontSize:40,marginBottom:12}}>🎯</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#3a6e9a",marginBottom:8}}>REVERSAL SCANNER</div>
+              <div style={{fontSize:11,color:"#2a5a7a",lineHeight:1.8}}>
+                Finds stocks that:<br/>
+                • Gapped far from 200 EMA<br/>
+                • HalfTrend now reversing back<br/>
+                • High probability mean reversion trades
+              </div>
+            </div>
+          )}
+          {results.length>0&&(
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead>
+                <tr style={{background:"#0a1520",position:"sticky",top:0,zIndex:1}}>
+                  {["SYMBOL","TF","PRICE","200 EMA","EMA DIST %","GAP %","DIRECTION","CANDLES AGO","SCORE","ACTION"].map(h=>(
+                    <th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:8,color:"#2a5a7a",letterSpacing:1,borderBottom:"1px solid #1e3a5a",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r,i)=>{
+                  const isShort = r.shortReversal;
+                  const col = isShort?"#ff1744":"#00e676";
+                  const bg  = i%2===0?"#080e1a":"#0a1218";
+                  return(
+                    <tr key={`${r.symbol}-${r.tf}-${i}`} style={{background:r.score>=70?(isShort?"#1a0505":"#051a05"):bg,
+                      borderBottom:"1px solid #0f1e2e",cursor:"pointer"}}
+                      onClick={()=>goToChart&&goToChart(r.symbol)}>
+                      <td style={{padding:"8px 10px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:13,fontWeight:700,color:"#e8f4ff"}}>{r.symbol}</span>
+                          <button onClick={e=>{e.stopPropagation();goToChart&&goToChart(r.symbol);}}
+                            style={{padding:"1px 5px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:3,
+                            color:"#00b4d8",fontSize:9,cursor:"pointer",fontFamily:"inherit"}}>📈</button>
+                        </div>
+                      </td>
+                      <td style={{padding:"8px 10px"}}>
+                        <span style={{padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700,
+                          background:"#0d1b2e",color:"#00b4d8",border:"1px solid #1e5a7a"}}>{r.tf.toUpperCase()}</span>
+                      </td>
+                      <td style={{padding:"8px 10px",color:"#e8f4ff",fontWeight:700}}>${r.price}</td>
+                      <td style={{padding:"8px 10px",color:"#3a6e9a"}}>${r.ema200}</td>
+                      <td style={{padding:"8px 10px"}}>
+                        <span style={{fontWeight:700,fontSize:12,
+                          color:r.absEma200>=5?"#ff1744":r.absEma200>=3?"#ff9800":"#ffeb3b"}}>
+                          {r.emaDist200>0?"+":""}{r.emaDist200}%
+                        </span>
+                      </td>
+                      <td style={{padding:"8px 10px"}}>
+                        <span style={{fontWeight:700,color:r.gapPct>0?"#ff6b6b":"#69f0ae"}}>
+                          {r.gapPct>0?"+":""}{r.gapPct}%
+                        </span>
+                      </td>
+                      <td style={{padding:"8px 10px"}}>
+                        <span style={{padding:"3px 8px",borderRadius:3,fontSize:10,fontWeight:700,
+                          background:isShort?"#2a0505":"#052a05",
+                          color:col,border:`1px solid ${col}`}}>
+                          {isShort?"▼ SHORT REV":"▲ LONG REV"}
+                        </span>
+                      </td>
+                      <td style={{padding:"8px 10px",textAlign:"center"}}>
+                        <span style={{fontSize:10,fontWeight:700,
+                          color:r.candlesAgo===0?"#ff9800":r.candlesAgo<=2?"#00e676":r.candlesAgo<=5?"#ffeb3b":"#3a6e9a"}}>
+                          {r.candlesAgo===0?"🔥 NOW":`${r.candlesAgo+1} bars ago`}
+                        </span>
+                      </td>
+                      <td style={{padding:"8px 10px",textAlign:"center"}}>
+                        <span style={{padding:"2px 8px",borderRadius:3,fontSize:11,fontWeight:700,
+                          background:r.score>=70?(isShort?"#2a0505":"#052a05"):r.score>=40?"#1a1200":"#0d1b2e",
+                          color:r.score>=70?col:r.score>=40?"#ffeb3b":"#3a6e9a",
+                          border:`1px solid ${r.score>=70?col:r.score>=40?"#ff9800":"#1e3a5a"}`}}>
+                          {r.score}
+                        </span>
+                      </td>
+                      <td style={{padding:"8px 10px"}}>
+                        <button onClick={e=>{e.stopPropagation();goToChart&&goToChart(r.symbol);}}
+                          style={{padding:"5px 10px",background:isShort?"linear-gradient(135deg,#2a0505,#3a0808)":"linear-gradient(135deg,#052a05,#083a08)",
+                          border:`1px solid ${col}`,borderRadius:4,color:col,
+                          fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>
+                          {isShort?"▼ SHORT":"▲ LONG"} →
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
   const [symbols,setSymbols]=useState(()=>{
@@ -2186,6 +2505,7 @@ export default function App(){
     {id:"ema",label:"📊 EMA",color:"#00b4d8"},
     {id:"ht",label:"★ HALFTREND",color:"#e040fb"},
     {id:"shaht",label:"🔥 SHA+HT",color:"#ff9800"},
+    {id:"reversal",label:"🎯 REVERSAL",color:"#ff9800"},
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
   ];
@@ -2254,6 +2574,7 @@ export default function App(){
           {activeTab==="ema"&&<EMAScanner {...scannerProps}/>}
           {activeTab==="ht"&&<HalfTrendScanner {...scannerProps}/>}
           {activeTab==="shaht"&&<SHAHTScanner {...scannerProps}/>}
+          {activeTab==="reversal"&&<ReversalScanner {...scannerProps}/>}
           {activeTab==="pnl"&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
               <BondoFund/>
