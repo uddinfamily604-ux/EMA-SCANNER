@@ -327,7 +327,7 @@ async function analyzeHTOnly(symbol, tf) {
   if(!c||c.closes.length<120) return null;
   const ht = calcHalfTrend(c.highs,c.lows,c.closes);
   if(!ht) return null;
-  return {...ht, price:c.closes[c.closes.length-1].toFixed(2)};
+  return {...ht, price:c.closes[c.closes.length-1].toFixed(2), candlesAgo:ht.candlesAgo, freshSignal:ht.freshSignal};
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -589,7 +589,8 @@ function StatBox({label,value,color="#c9d8e8",bg="#0d1b2e",border="#1e3a5a",sub=
 function calcPnl(direction, type, entry, exit, qty) {
   const e = parseFloat(entry), x = parseFloat(exit), q = parseFloat(qty)||1;
   if(!e||!x) return 0;
-  const mult = (type==="OPTIONS"||type==="CALL"||type==="PUT") ? 100 : 1;
+  const optionTypes = ["BUY CALL","BUY PUT","SELL CALL","SELL PUT"];
+  const mult = optionTypes.includes(direction) ? 100 : 1;
   const longTypes = ["BUY","BUY CALL","SELL PUT","COVER"];
   const dir = longTypes.includes(direction) ? 1 : -1;
   return dir * (x - e) * q * mult;
@@ -655,9 +656,69 @@ function BondoFund() {
     setFetchingClose(p=>({...p,[id]:false}));
   };
 
-  // ── Auto-refresh open position prices every 30s ──
+  // ── WebSocket real-time streaming for open positions ──
+  const wsRef = useRef(null);
+  const [wsStatus, setWsStatus] = useState("disconnected"); // connected | delayed | disconnected
+
   useEffect(()=>{
-    const refresh = async () => {
+    if(openTrades.length===0){ setWsStatus("disconnected"); return; }
+
+    // Close existing WS
+    if(wsRef.current){ wsRef.current.close(); wsRef.current=null; }
+
+    const syms = [...new Set(openTrades.map(t=>t.symbol.toUpperCase()))];
+    const ws = new WebSocket("wss://socket.polygon.io/stocks");
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({action:"auth",params:API_KEY}));
+    };
+
+    ws.onmessage = (e) => {
+      const msgs = JSON.parse(e.data);
+      msgs.forEach(msg => {
+        // Auth response
+        if(msg.ev==="status"){
+          if(msg.status==="auth_success"){
+            // Subscribe to trades for all open position symbols
+            ws.send(JSON.stringify({action:"subscribe", params: syms.map(s=>`T.${s}`).join(",")}));
+            setWsStatus("connected");
+          } else if(msg.status==="auth_failed"){
+            setWsStatus("delayed");
+          } else if(msg.status==="delayed"){
+            setWsStatus("delayed");
+          }
+        }
+        // Trade tick
+        if(msg.ev==="T"){
+          const price = parseFloat(msg.p).toFixed(2);
+          // Update all open trades matching this symbol
+          setTrades(prev => {
+            const updated = prev.map(t => {
+              if(t.pnl===null && t.symbol.toUpperCase()===msg.sym){
+                return {...t, _livePrice: parseFloat(price)};
+              }
+              return t;
+            });
+            return updated;
+          });
+          setClosingPrices(p=>{
+            const next = {...p};
+            // find open trade ids matching this symbol
+            openTrades.forEach(t=>{
+              if(t.symbol.toUpperCase()===msg.sym) next[t.id]=price;
+            });
+            return next;
+          });
+        }
+      });
+    };
+
+    ws.onerror = () => { setWsStatus("delayed"); };
+    ws.onclose = () => { setWsStatus("disconnected"); };
+
+    // Fallback: also do one REST fetch immediately for current price
+    const restFetch = async () => {
       for(const t of openTrades){
         try {
           const res = await fetch(`https://api.polygon.io/v2/last/trade/${t.symbol}?apiKey=${API_KEY}`);
@@ -666,10 +727,10 @@ function BondoFund() {
         } catch(e){}
       }
     };
-    refresh();
-    const timer = setInterval(refresh, 30000);
-    return ()=>clearInterval(timer);
-  }, [trades]);
+    restFetch();
+
+    return ()=>{ if(wsRef.current){ wsRef.current.close(); wsRef.current=null; } };
+  }, [openTrades.length, openTrades.map(t=>t.symbol).join(",")]);
 
   // ── Open a new position ──
   const openPosition = () => {
@@ -806,6 +867,13 @@ function BondoFund() {
       {/* ── OPEN POSITIONS ── */}
       {view==="positions"&&(
         <div style={{padding:"12px 16px"}}>
+          {/* WS Status Bar */}
+          <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:wsStatus==="connected"?"#00e676":wsStatus==="delayed"?"#ffeb3b":"#ff1744",boxShadow:wsStatus==="connected"?"0 0 6px #00e676":"none"}}/>
+            <span style={{fontSize:9,color:wsStatus==="connected"?"#00e676":wsStatus==="delayed"?"#ffeb3b":"#3a6e9a",letterSpacing:1}}>
+              {wsStatus==="connected"?"⚡ REAL-TIME STREAMING":wsStatus==="delayed"?"⚠️ DELAYED DATA":"○ DISCONNECTED"}
+            </span>
+          </div>
           {openTrades.length===0&&(
             <div style={{textAlign:"center",padding:"40px",color:"#2a5a7a"}}>
               <div style={{fontSize:30,marginBottom:8}}>⚡</div>
@@ -1348,6 +1416,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
   const [errors,setErrors]=useState([]);
   const [autoOn,setAutoOn]=useState(false);
   const [autoMin,setAutoMin]=useState(5);
+  const [freshOnly,setFreshOnly]=useState(true);
   const prevAlignedRef = useRef(new Set());
 
   const runScan=useCallback(async()=>{
@@ -1562,8 +1631,14 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           const totalFetched=htResults.filter(Boolean).length;
           const aligned=totalFetched===4&&matchCount===4;
           const flipCount=htResults.filter(r=>r&&(isSell?r.sellSignal:r.buySignal)).length;
+          // 4th timeframe freshness check — skip if signal is older than 3 candles
+          if(r4&&freshOnly){
+            const r4fresh = r4.candlesAgo<=2;
+            if(!r4fresh) return;
+          }
           if(totalFetched===0) return;
-          all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount});
+          const r4CandlesAgo = r4?.candlesAgo??null;
+          all.push({symbol:sym,price,r1,r2,r3,r4,aligned,matchCount,totalFetched,flipCount,r4CandlesAgo});
         } catch(e){failed.push(sym);}
       }));
       setProg({done:Math.min(b+BATCH,syms.length),total:syms.length});
@@ -1625,6 +1700,17 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
             </button>)}
           </div>
         </Section>
+        <Section title="TF4 SIGNAL FRESHNESS">
+          <div style={{padding:"8px",background:"#0d1b2e",borderRadius:4,border:`1px solid ${freshOnly?"#ffeb3b":"#1e3a5a"}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <input type="checkbox" checked={freshOnly} onChange={e=>setFreshOnly(e.target.checked)} id="ht_fresh"/>
+              <label htmlFor="ht_fresh" style={{fontSize:10,color:freshOnly?"#ffeb3b":"#3a6e9a",cursor:"pointer",fontWeight:700}}>⚡ FRESH SIGNALS ONLY</label>
+            </div>
+            <div style={{fontSize:9,color:"#2a5a7a",lineHeight:1.5}}>
+              TF4 signal must be within <span style={{color:"#ffeb3b",fontWeight:700}}>3 candles</span> — skip stale signals
+            </div>
+          </div>
+        </Section>
         <Section title="AUTO-REFRESH">
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <input type="checkbox" checked={autoOn} onChange={e=>setAutoOn(e.target.checked)} id="ht_auto"/>
@@ -1678,7 +1764,13 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                       </div>
                     </td>
                     <td style={{padding:"7px 8px",color:"#c9d8e8"}}>{r.price}</td>
-                    {[r.r1,r.r2,r.r3,r.r4].map((ht,j)=><td key={j} style={{padding:"7px 8px"}}><HTBadge result={ht}/></td>)}
+                    {[r.r1,r.r2,r.r3].map((ht,j)=><td key={j} style={{padding:"7px 8px"}}><HTBadge result={ht}/></td>)}
+                    <td style={{padding:"7px 8px"}}>
+                      <HTBadge result={r.r4}/>
+                      {r.r4CandlesAgo!==null&&<div style={{fontSize:8,marginTop:2,color:r.r4CandlesAgo<=2?"#00e676":r.r4CandlesAgo<=5?"#ffeb3b":"#ff5722",fontWeight:700}}>
+                        {r.r4CandlesAgo===0?"🔥 NOW":r.r4CandlesAgo<=2?`⚡ ${r.r4CandlesAgo+1} candles ago`:`${r.r4CandlesAgo+1} candles ago`}
+                      </div>}
+                    </td>
                     <td style={{padding:"7px 8px"}}>
                       <span style={{padding:"2px 7px",borderRadius:3,fontSize:10,fontWeight:700,
                         background:r.matchCount===4?(direction==="SELL"?"#3a0505":"#053a05"):"#1a1a05",
