@@ -1261,14 +1261,18 @@ function BondoFund() {
                     <div>
                       <div style={{fontSize:9,color:"#ffeb3b",fontWeight:700,marginBottom:6}}>ADD TO POSITION · Avg Entry: ${t.entry}</div>
                       <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <input placeholder="Add price" value={addInputs[t.id]?.price||""}
+                        <input placeholder="Add price" value={addInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
                           onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
                           style={{flex:1,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
                         <input placeholder="Qty" value={addInputs[t.id]?.qty||""}
                           onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
                           style={{width:60,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>{ addToPosition(t.id, addInputs[t.id]?.price, addInputs[t.id]?.qty); setAddInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
-                          disabled={!addInputs[t.id]?.price||!addInputs[t.id]?.qty}
+                        <button onClick={()=>{ addToPosition(t.id, addInputs[t.id]?.price ?? closingPrices[t.id], addInputs[t.id]?.qty); setAddInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
+                          disabled={!(addInputs[t.id]?.price||closingPrices[t.id])||!addInputs[t.id]?.qty}
                           style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b3b00,#555500)",border:"1px solid #ffeb3b",borderRadius:4,
                             color:"#ffeb3b",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
                           ➕ ADD
@@ -1289,9 +1293,13 @@ function BondoFund() {
                     <div>
                       <div style={{fontSize:9,color:"#ff9800",fontWeight:700,marginBottom:6}}>PARTIAL SELL · Holding {t.qty} shares</div>
                       <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <input placeholder="Exit price" value={partialInputs[t.id]?.price||""}
+                        <input placeholder="Exit price" value={partialInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
                           onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
                           style={{flex:1,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
                         <input placeholder="Sell qty" value={partialInputs[t.id]?.qty||""}
                           onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
                           style={{width:60,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
