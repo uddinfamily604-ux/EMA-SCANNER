@@ -844,6 +844,9 @@ function BondoFund() {
   const [liveQuote, setLiveQuote] = useState(null);
   const [closingPrices, setClosingPrices] = useState({});
   const [fetchingClose, setFetchingClose] = useState({});
+  const [posAction, setPosAction] = useState({}); // {id: "close"|"add"|"partial"}
+  const [addInputs, setAddInputs] = useState({});   // {id: {price, qty}}
+  const [partialInputs, setPartialInputs] = useState({}); // {id: {price, qty}}
   const symDebounceRef = useRef(null);
   const priceTimerRef = useRef({});
 
@@ -989,6 +992,55 @@ function BondoFund() {
       const pnl = calcPnl(t.direction, t.type, t.entry, exitPrice, t.qty);
       return {...t, exit:exitPrice, pnl, open:false, closedAt:getETDateTime()};
     });
+    saveBondoFund(updated); setTrades(updated);
+  };
+
+  // ── Add to existing position (avg down/up) ──
+  const addToPosition = (id, addPrice, addQty) => {
+    const price = parseFloat(addPrice);
+    const qty = parseFloat(addQty);
+    if(!price || !qty || qty <= 0) return;
+    const updated = trades.map(t => {
+      if(t.id !== id) return t;
+      const newQty = parseFloat(t.qty) + qty;
+      // Weighted average entry price
+      const newAvgEntry = ((parseFloat(t.entry) * parseFloat(t.qty)) + (price * qty)) / newQty;
+      const note = (t.note||"") + ` +${qty}@$${price}`;
+      return {...t, qty: newQty, entry: newAvgEntry.toFixed(2), note: note.trim()};
+    });
+    saveBondoFund(updated); setTrades(updated);
+  };
+
+  // ── Partial close ──
+  const partialClose = (id, exitPrice, sellQty) => {
+    const price = parseFloat(exitPrice);
+    const qty = parseFloat(sellQty);
+    if(!price || !qty || qty <= 0) return;
+    const trade = trades.find(t => t.id === id);
+    if(!trade) return;
+    const remainQty = parseFloat(trade.qty) - qty;
+    if(remainQty < 0) { alert("Cannot sell more than you hold!"); return; }
+    // Record partial close as a closed trade
+    const partialPnl = calcPnl(trade.direction, trade.type, trade.entry, price, qty);
+    const closedPartial = {
+      ...trade,
+      id: Date.now(),
+      qty: qty,
+      exit: price,
+      pnl: partialPnl,
+      open: false,
+      closedAt: getETDateTime(),
+      note: `Partial close of ${trade.symbol} (${qty} of ${trade.qty})`,
+    };
+    let updated;
+    if(remainQty === 0) {
+      // Full close via partial
+      updated = trades.map(t => t.id === id ? {...t, exit:price, pnl:partialPnl, open:false, closedAt:getETDateTime()} : t);
+    } else {
+      // Keep remaining open, add closed partial as new entry
+      updated = trades.map(t => t.id === id ? {...t, qty: remainQty} : t);
+      updated = [...updated, closedPartial];
+    }
     saveBondoFund(updated); setTrades(updated);
   };
 
@@ -1159,43 +1211,109 @@ function BondoFund() {
                   <span style={{color:"#2a4a6a"}}> · Opened: {t.timestamp}</span>
                 </div>
 
-                {/* CLOSE POSITION */}
+                {/* POSITION ACTIONS — ADD / PARTIAL / CLOSE */}
                 <div style={{background:"#080e1a",borderRadius:6,padding:"10px",border:"1px solid #1e5a3a"}}>
-                  <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:8}}>CLOSE POSITION</div>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <input
-                      value={closingPrices[t.id]||""}
-                      onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
-                      placeholder="Exit price"
-                      style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,
-                        color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}
-                    />
-                    <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
-                      style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,
-                        color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                      {fetchingClose[t.id]?"⟳":"📡 LIVE"}
-                    </button>
-                    <button onClick={()=>closePosition(t.id)}
-                      disabled={!closingPrices[t.id]}
-                      style={{padding:"8px 14px",
-                        background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
-                        border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,
-                        borderRadius:4,color:closingPrices[t.id]?"#00e676":"#2a5a7a",
-                        fontSize:11,fontFamily:"inherit",cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
-                      ✓ CLOSE
-                    </button>
+                  {/* Tab selector */}
+                  <div style={{display:"flex",gap:4,marginBottom:8}}>
+                    {[["close","✓ CLOSE","#00e676"],["add","➕ ADD","#ffeb3b"],["partial","➖ PARTIAL","#ff9800"]].map(([key,label,color])=>(
+                      <button key={key} onClick={()=>setPosAction(p=>({...p,[t.id]:p[t.id]===key?null:key}))}
+                        style={{flex:1,padding:"5px 4px",fontSize:9,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:3,
+                          background:posAction[t.id]===key?color+"22":"#0d1b2e",
+                          border:`1px solid ${posAction[t.id]===key?color:"#1e3a5a"}`,
+                          color:posAction[t.id]===key?color:"#3a6e9a"}}>
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  {/* Preview P&L on close */}
-                  {closingPrices[t.id]&&(()=>{
-                    const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
-                    const col = preview>=0?"#00e676":"#ff1744";
-                    return (
-                      <div style={{marginTop:6,display:"flex",gap:12}}>
-                        <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
-                        <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
+
+                  {/* CLOSE */}
+                  {(posAction[t.id]==="close"||!posAction[t.id])&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:6}}>CLOSE ALL {t.qty} SHARES</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input value={closingPrices[t.id]||""} onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
+                          placeholder="Exit price" style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
+                        <button onClick={()=>closePosition(t.id)} disabled={!closingPrices[t.id]}
+                          style={{padding:"8px 14px",background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
+                            border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,borderRadius:4,
+                            color:closingPrices[t.id]?"#00e676":"#2a5a7a",fontSize:11,fontFamily:"inherit",
+                            cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
+                          ✓ CLOSE ALL
+                        </button>
                       </div>
-                    );
-                  })()}
+                      {closingPrices[t.id]&&(()=>{
+                        const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
+                        const col = preview>=0?"#00e676":"#ff1744";
+                        return <div style={{marginTop:6,display:"flex",gap:12}}>
+                          <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
+                          <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
+                        </div>;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* ADD TO POSITION */}
+                  {posAction[t.id]==="add"&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#ffeb3b",fontWeight:700,marginBottom:6}}>ADD TO POSITION · Avg Entry: ${t.entry}</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input placeholder="Add price" value={addInputs[t.id]?.price||""}
+                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
+                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <input placeholder="Qty" value={addInputs[t.id]?.qty||""}
+                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
+                          style={{width:60,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ addToPosition(t.id, addInputs[t.id]?.price, addInputs[t.id]?.qty); setAddInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
+                          disabled={!addInputs[t.id]?.price||!addInputs[t.id]?.qty}
+                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b3b00,#555500)",border:"1px solid #ffeb3b",borderRadius:4,
+                            color:"#ffeb3b",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          ➕ ADD
+                        </button>
+                      </div>
+                      {addInputs[t.id]?.price&&addInputs[t.id]?.qty&&(()=>{
+                        const newQty = parseFloat(t.qty)+parseFloat(addInputs[t.id].qty);
+                        const newAvg = ((parseFloat(t.entry)*parseFloat(t.qty))+(parseFloat(addInputs[t.id].price)*parseFloat(addInputs[t.id].qty)))/newQty;
+                        return <div style={{marginTop:6,fontSize:9,color:"#ffeb3b"}}>
+                          New avg: <strong>${newAvg.toFixed(2)}</strong> · Total qty: <strong>{newQty}</strong>
+                        </div>;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* PARTIAL CLOSE */}
+                  {posAction[t.id]==="partial"&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#ff9800",fontWeight:700,marginBottom:6}}>PARTIAL SELL · Holding {t.qty} shares</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input placeholder="Exit price" value={partialInputs[t.id]?.price||""}
+                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
+                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <input placeholder="Sell qty" value={partialInputs[t.id]?.qty||""}
+                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
+                          style={{width:60,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ partialClose(t.id, partialInputs[t.id]?.price, partialInputs[t.id]?.qty); setPartialInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
+                          disabled={!partialInputs[t.id]?.price||!partialInputs[t.id]?.qty}
+                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b1500,#5a2500)",border:"1px solid #ff9800",borderRadius:4,
+                            color:"#ff9800",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          ➖ SELL
+                        </button>
+                      </div>
+                      {partialInputs[t.id]?.price&&partialInputs[t.id]?.qty&&(()=>{
+                        const sellQty = parseFloat(partialInputs[t.id].qty);
+                        const remain = parseFloat(t.qty) - sellQty;
+                        const pnl = calcPnl(t.direction,t.type,t.entry,partialInputs[t.id].price,sellQty);
+                        const col = pnl>=0?"#00e676":"#ff1744";
+                        return <div style={{marginTop:6,fontSize:9,color:"#ff9800"}}>
+                          Selling {sellQty} shares · Remaining: <strong>{remain>=0?remain:"⚠️ OVER"}</strong>
+                          {remain>=0&&<span style={{color:col,fontWeight:700}}> · P&L: {pnl>=0?"+":""}${pnl.toFixed(2)}</span>}
+                        </div>;
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             );
