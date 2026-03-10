@@ -343,6 +343,17 @@ async function analyzeHTOnly(symbol, tf) {
 // Fetches daily candles and computes: RelVol, ATR%, EMA distance
 async function getStockMetrics(symbol) {
   try {
+    // ── Cache check (localStorage keyed by symbol + today's date) ──
+    const today = new Date().toISOString().split("T")[0];
+    const cacheKey = `bondo_metrics_${symbol}_${today}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.score !== undefined) return parsed;
+      }
+    } catch(cacheErr) {}
+
     const now = new Date();
     const from = new Date(now);
     from.setDate(from.getDate() - 60); // 60 days of daily data
@@ -394,8 +405,27 @@ async function getStockMetrics(symbol) {
     const edScore = Math.abs(emaDist)>=3?30:Math.abs(emaDist)>=1.5?20:Math.abs(emaDist)>=0.5?10:0;
     const score = rvScore+atrScore+edScore;
 
-    return { relVol, atrPct, emaDist, score, price: price.toFixed(2), avgVol20: Math.round(avgVol20) };
+    const result = { relVol, atrPct, emaDist, score, price: price.toFixed(2), avgVol20: Math.round(avgVol20) };
+
+    // ── Save to cache ──
+    try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch(cacheErr) {}
+
+    return result;
   } catch(e){ return null; }
+}
+
+// ── Purge old metrics cache entries (auto-cleanup) ──
+function purgeOldMetricsCache() {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const toDelete = [];
+    for(let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if(key && key.startsWith("bondo_metrics_") && !key.includes(today)) toDelete.push(key);
+    }
+    toDelete.forEach(k => localStorage.removeItem(k));
+    if(toDelete.length > 0) console.log("🧹 Purged", toDelete.length, "old metric cache entries");
+  } catch(e) {}
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -2451,6 +2481,9 @@ export default function App(){
     try { const s=localStorage.getItem("alo_watchlist"); return s||DEFAULT_SYMBOLS.join(","); }
     catch(e){ return DEFAULT_SYMBOLS.join(","); }
   });
+
+  // ── Purge stale metric cache on every app load ──
+  useEffect(() => { purgeOldMetricsCache(); }, []);
   const [activeTab,setActiveTab]=useState(()=>{
     try { return localStorage.getItem("alo_tab")||"ema"; } catch(e){ return "ema"; }
   });
