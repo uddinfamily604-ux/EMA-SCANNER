@@ -55,12 +55,60 @@ async function sendPushover(userKey, apiToken, title, message) {
 let SIGNAL_LOG = [];
 try { SIGNAL_LOG = JSON.parse(localStorage.getItem("alo_signal_log")||"[]"); } catch(e){}
 function addSignalLog(entry) {
-  SIGNAL_LOG = [entry, ...SIGNAL_LOG].slice(0,100);
+  const enriched = {
+    ...entry,
+    id: Date.now(),
+    entryPrice: parseFloat(entry.price),
+    p15: null, p30: null, p60: null, pEOD: null,   // price snapshots
+    pnl15: null, pnl30: null, pnl60: null,           // % moves
+    checked15: false, checked30: false, checked60: false,
+  };
+  SIGNAL_LOG = [enriched, ...SIGNAL_LOG].slice(0, 200);
   try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
 }
 function clearSignalLog() {
   SIGNAL_LOG = [];
   try { localStorage.removeItem("alo_signal_log"); } catch(e){}
+}
+function saveSignalLog() {
+  try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
+}
+
+// ── Update signal performance with a fetched price ──
+async function checkSignalPerformance() {
+  const now = Date.now();
+  let updated = false;
+  for(let i = 0; i < SIGNAL_LOG.length; i++) {
+    const s = SIGNAL_LOG[i];
+    if(!s.id || !s.entryPrice) continue;
+    const age = (now - s.id) / 1000 / 60; // minutes since signal
+    const needsCheck = (!s.checked15 && age >= 15) || (!s.checked30 && age >= 30) || (!s.checked60 && age >= 60);
+    if(!needsCheck) continue;
+    try {
+      const res = await fetch(`https://api.polygon.io/v2/last/trade/${s.symbol}?apiKey=${API_KEY}`);
+      const data = await res.json();
+      const cur = data.results?.p;
+      if(!cur) continue;
+      const pct = ((cur - s.entryPrice) / s.entryPrice * 100);
+      const isLong = s.direction === "BUY";
+      const signedPct = isLong ? pct : -pct; // positive = signal was correct
+      if(!s.checked15 && age >= 15) {
+        SIGNAL_LOG[i] = {...s, checked15:true, p15:cur.toFixed(2), pnl15:signedPct.toFixed(2)};
+        s.checked15 = true; s.p15 = cur.toFixed(2); s.pnl15 = signedPct.toFixed(2);
+        updated = true;
+      }
+      if(!s.checked30 && age >= 30) {
+        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked30:true, p30:cur.toFixed(2), pnl30:signedPct.toFixed(2)};
+        updated = true;
+      }
+      if(!s.checked60 && age >= 60) {
+        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked60:true, p60:cur.toFixed(2), pnl60:signedPct.toFixed(2)};
+        updated = true;
+      }
+    } catch(e) {}
+  }
+  if(updated) saveSignalLog();
+  return updated;
 }
 
 // ─── P&L TRACKER ─────────────────────────────────────────────────────────────
@@ -605,17 +653,58 @@ function AlertSettings({pushKey,setPushKey,pushToken,setPushToken,soundOn,setSou
 // ─── SIGNAL LOG PANEL ─────────────────────────────────────────────────────────
 function SignalLogPanel({logVersion}) {
   const [show, setShow] = useState(false);
-  const [,forceUpdate] = useState(0);
-  const handleClear = ()=>{ clearSignalLog(); forceUpdate(n=>n+1); };
+  const [tick, setTick] = useState(0);
+
+  // Auto-check performance every 60 seconds
+  useEffect(()=>{
+    const interval = setInterval(async()=>{
+      const updated = await checkSignalPerformance();
+      if(updated) setTick(n=>n+1);
+    }, 60000);
+    return ()=>clearInterval(interval);
+  },[]);
+
+  const handleClear = ()=>{ clearSignalLog(); setTick(n=>n+1); };
+
+  // Stats calculation
+  const completed = SIGNAL_LOG.filter(s=>s.pnl60!==null);
+  const wins = completed.filter(s=>parseFloat(s.pnl60)>0);
+  const losses = completed.filter(s=>parseFloat(s.pnl60)<=0);
+  const winRate = completed.length>0?((wins.length/completed.length)*100).toFixed(0):null;
+  const avgMove = completed.length>0?(completed.reduce((a,s)=>a+parseFloat(s.pnl60),0)/completed.length).toFixed(2):null;
+
+  const PnlBadge = ({val, label})=>{
+    if(val===null) return <span style={{fontSize:8,color:"#2a5a7a",padding:"1px 4px",border:"1px solid #1e3a5a",borderRadius:2}}>{label}…</span>;
+    const v = parseFloat(val);
+    const c = v>0?"#00e676":v<0?"#ff1744":"#ffeb3b";
+    return <span style={{fontSize:8,color:c,padding:"1px 4px",border:`1px solid ${c}`,borderRadius:2,fontWeight:700}}>{label} {v>0?"+":""}{v}%</span>;
+  };
+
   return (
     <div style={{borderTop:"1px solid #1e3a5a",padding:"8px 12px"}}>
       <button onClick={()=>setShow(s=>!s)} style={{width:"100%",padding:"6px",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#ffeb3b",fontSize:10,fontFamily:"inherit",fontWeight:700,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span>📋 SIGNAL LOG ({SIGNAL_LOG.length})</span>
-        <span>{show?"▲":"▼"}</span>
+        <span style={{display:"flex",gap:6,alignItems:"center"}}>
+          {winRate!==null&&<span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744"}}>WIN {winRate}%</span>}
+          {avgMove!==null&&<span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744"}}>AVG {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>}
+          <span>{show?"▲":"▼"}</span>
+        </span>
       </button>
       {show&&(
-        <div style={{maxHeight:220,overflowY:"auto",marginTop:6}}>
+        <div style={{maxHeight:320,overflowY:"auto",marginTop:6}}>
           <button onClick={handleClear} style={{width:"100%",padding:"4px",marginBottom:6,background:"#1a0a00",border:"1px solid #ff5722",borderRadius:3,color:"#ff5722",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>🗑 CLEAR LOG</button>
+
+          {/* Stats bar */}
+          {completed.length>0&&(
+            <div style={{display:"flex",gap:6,marginBottom:8,padding:"6px 8px",background:"#0a1520",borderRadius:4,border:"1px solid #1e3a5a",flexWrap:"wrap"}}>
+              <span style={{fontSize:9,color:"#3a6e9a"}}>📊 {completed.length} completed</span>
+              <span style={{fontSize:9,color:"#00e676"}}>✅ {wins.length} wins</span>
+              <span style={{fontSize:9,color:"#ff1744"}}>❌ {losses.length} losses</span>
+              <span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744",fontWeight:700}}>WIN RATE: {winRate}%</span>
+              <span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744",fontWeight:700}}>AVG 1HR: {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>
+            </div>
+          )}
+
           {SIGNAL_LOG.length===0&&<div style={{fontSize:10,color:"#2a5a7a",textAlign:"center",padding:10}}>No signals yet</div>}
           {SIGNAL_LOG.map((s,i)=>(
             <div key={i} style={{padding:"6px 8px",marginBottom:4,background:s.direction==="SELL"?"#1a050a":"#051a0a",border:`1px solid ${s.direction==="SELL"?"#ff1744":"#00e676"}`,borderRadius:4}}>
@@ -623,8 +712,15 @@ function SignalLogPanel({logVersion}) {
                 <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{s.symbol}</span>
                 <span style={{fontSize:9,color:s.direction==="SELL"?"#ff1744":"#00e676",fontWeight:700}}>★ {s.direction}</span>
               </div>
-              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · ${s.price}</div>
+              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · Entry: <span style={{color:"#e8f4ff",fontWeight:700}}>${s.price}</span></div>
               <div style={{fontSize:9,color:"#ffeb3b",marginTop:2}}>🕐 {s.timestamp}</div>
+              {/* Performance badges */}
+              <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
+                <PnlBadge val={s.pnl15} label="15m"/>
+                <PnlBadge val={s.pnl30} label="30m"/>
+                <PnlBadge val={s.pnl60} label="1hr"/>
+                {s.p15&&<span style={{fontSize:8,color:"#2a5a7a"}}>→ ${s.p15}</span>}
+              </div>
             </div>
           ))}
         </div>
