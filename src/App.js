@@ -122,21 +122,62 @@ async function fetchCandles(symbol, tf) {
   try {
     const { multiplier, timespan } = parseTF(tf);
     const now = new Date();
+
+    // ── Cache key: symbol + tf + date + hour (intraday TFs refresh hourly, daily refreshes once) ──
+    const today = now.toISOString().split("T")[0];
+    const hour = now.getHours();
+    const isIntraday = ["minute","hour"].includes(timespan);
+    const cacheKey = `bondo_candles_${symbol}_${tf}_${today}${isIntraday ? "_h"+hour : ""}`;
+
+    // ── Check cache first ──
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.closes && parsed.closes.length > 0) return parsed;
+      }
+    } catch(cacheErr) {}
+
     const from = new Date(now);
     from.setDate(from.getDate() - daysBack(timespan));
     const fromStr = from.toISOString().split("T")[0];
-    const toStr = now.toISOString().split("T")[0];
+    const toStr = today;
     const url = `${BASE_URL}/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=5000&apiKey=${API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
     if (!data.results || data.results.length === 0) return null;
-    return {
+    const result = {
       closes: data.results.map(r => r.c),
       opens:  data.results.map(r => r.o),
       highs:  data.results.map(r => r.h),
       lows:   data.results.map(r => r.l),
     };
+
+    // ── Save to cache ──
+    try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch(cacheErr) {}
+
+    return result;
   } catch(e) { return null; }
+}
+
+// ── Purge old candle cache entries ──
+function purgeOldCandleCache() {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const hour = new Date().getHours();
+    const toDelete = [];
+    for(let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if(!key || !key.startsWith("bondo_candles_")) continue;
+      // Delete if not today's date
+      if(!key.includes(today)) { toDelete.push(key); continue; }
+      // Delete intraday candles older than current hour
+      const hourMatch = key.match(/_h(\d+)$/);
+      if(hourMatch && parseInt(hourMatch[1]) < hour) toDelete.push(key);
+    }
+    toDelete.forEach(k => localStorage.removeItem(k));
+    if(toDelete.length > 0) console.log("🧹 Purged", toDelete.length, "old candle cache entries");
+  } catch(e) {}
 }
 
 // ─── EMA UTILS ────────────────────────────────────────────────────────────────
@@ -343,22 +384,19 @@ async function analyzeHTOnly(symbol, tf) {
 // Fetches daily candles and computes: RelVol, ATR%, EMA distance
 async function getStockMetrics(symbol) {
   try {
-    // ── Cache check (localStorage keyed by symbol + today's date) ──
+    // ── Cache check ──
     const today = new Date().toISOString().split("T")[0];
     const cacheKey = `bondo_metrics_${symbol}_${today}`;
     try {
       const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && parsed.score !== undefined) return parsed;
-      }
-    } catch(cacheErr) {}
+      if(cached) { const p = JSON.parse(cached); if(p && p.score !== undefined) return p; }
+    } catch(e) {}
 
     const now = new Date();
     const from = new Date(now);
-    from.setDate(from.getDate() - 60); // 60 days of daily data
+    from.setDate(from.getDate() - 60);
     const fromStr = from.toISOString().split("T")[0];
-    const toStr = now.toISOString().split("T")[0];
+    const toStr = today;
     const url = `${BASE_URL}/v2/aggs/ticker/${symbol}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=100&apiKey=${API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
@@ -397,34 +435,29 @@ async function getStockMetrics(symbol) {
     const emaDist = parseFloat(((price-ema)/ema*100).toFixed(2));
 
     // ── Score (0-100) ──
-    // RelVol: >2 = 40pts, >1.5 = 25pts, >1 = 10pts
-    // ATR%: >3 = 30pts, >2 = 20pts, >1 = 10pts
-    // AbsEmaDist: >3% = 30pts, >1.5% = 20pts, >0.5% = 10pts
     const rvScore = relVol>=2?40:relVol>=1.5?25:relVol>=1?10:0;
     const atrScore = atrPct>=3?30:atrPct>=2?20:atrPct>=1?10:0;
     const edScore = Math.abs(emaDist)>=3?30:Math.abs(emaDist)>=1.5?20:Math.abs(emaDist)>=0.5?10:0;
     const score = rvScore+atrScore+edScore;
 
     const result = { relVol, atrPct, emaDist, score, price: price.toFixed(2), avgVol20: Math.round(avgVol20) };
-
     // ── Save to cache ──
-    try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch(cacheErr) {}
-
+    try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch(e) {}
     return result;
   } catch(e){ return null; }
 }
 
-// ── Purge old metrics cache entries (auto-cleanup) ──
+// ── Purge old metrics cache ──
 function purgeOldMetricsCache() {
   try {
     const today = new Date().toISOString().split("T")[0];
     const toDelete = [];
-    for(let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
       if(key && key.startsWith("bondo_metrics_") && !key.includes(today)) toDelete.push(key);
     }
-    toDelete.forEach(k => localStorage.removeItem(k));
-    if(toDelete.length > 0) console.log("🧹 Purged", toDelete.length, "old metric cache entries");
+    toDelete.forEach(k=>localStorage.removeItem(k));
+    if(toDelete.length>0) console.log("🧹 Purged",toDelete.length,"old metric cache entries");
   } catch(e) {}
 }
 
@@ -2482,8 +2515,8 @@ export default function App(){
     catch(e){ return DEFAULT_SYMBOLS.join(","); }
   });
 
-  // ── Purge stale metric cache on every app load ──
-  useEffect(() => { purgeOldMetricsCache(); }, []);
+  // ── Purge stale cache on every app load ──
+  useEffect(()=>{ purgeOldMetricsCache(); purgeOldCandleCache(); },[]);
   const [activeTab,setActiveTab]=useState(()=>{
     try { return localStorage.getItem("alo_tab")||"ema"; } catch(e){ return "ema"; }
   });
