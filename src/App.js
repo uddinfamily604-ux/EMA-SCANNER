@@ -643,12 +643,20 @@ function saveBondoFund(trades) {
   try { localStorage.setItem("bondo_fund", JSON.stringify(trades)); } catch(e){}
 }
 
-function calcFundStats(trades) {
+function calcFundStats(trades, livePrices={}) {
   const closed = trades.filter(t=>t.pnl!==null);
   const open = trades.filter(t=>t.pnl===null);
   const totalPnl = closed.reduce((a,t)=>a+parseFloat(t.pnl),0);
-  const nav = STARTING_BALANCE + totalPnl;
-  const roi = (totalPnl/STARTING_BALANCE)*100;
+
+  // ── Unrealized P&L from open positions using live prices ──
+  const unrealizedPnl = open.reduce((sum, t) => {
+    const cur = parseFloat(livePrices[t.id]);
+    if(!cur || !t.entry) return sum;
+    return sum + calcPnl(t.direction, t.type, t.entry, cur, t.qty);
+  }, 0);
+
+  const nav = STARTING_BALANCE + totalPnl + unrealizedPnl;
+  const roi = ((totalPnl + unrealizedPnl) / STARTING_BALANCE) * 100;
   const wins = closed.filter(t=>parseFloat(t.pnl)>0);
   const losses = closed.filter(t=>parseFloat(t.pnl)<0);
   const winRate = closed.length>0?(wins.length/closed.length*100):0;
@@ -665,7 +673,7 @@ function calcFundStats(trades) {
   const maxDDPct = peak>0?(maxDD/peak*100):0;
   const bondo = Math.max(0,totalPnl)*0.20;
   const sharpe = avgLoss>0?(avgWin/avgLoss).toFixed(2):"∞";
-  return {totalPnl,nav,roi,wins:wins.length,losses:losses.length,winRate,avgWin,avgLoss,profitFactor,maxDD,maxDDPct,bondo,sharpe,closed:closed.length,openCount:open.length};
+  return {totalPnl,unrealizedPnl,nav,roi,wins:wins.length,losses:losses.length,winRate,avgWin,avgLoss,profitFactor,maxDD,maxDDPct,bondo,sharpe,closed:closed.length,openCount:open.length};
 }
 
 function MiniEquityCurve({trades}) {
@@ -743,7 +751,7 @@ function BondoFund() {
   const symDebounceRef = useRef(null);
   const priceTimerRef = useRef({});
 
-  const s = calcFundStats(trades);
+  const s = calcFundStats(trades, closingPrices);
   const openTrades   = trades.filter(t=>t.pnl===null);
   const closedTrades = trades.filter(t=>t.pnl!==null);
 
@@ -927,7 +935,7 @@ function BondoFund() {
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:28,fontWeight:700,color:navColor}}>${s.nav.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-            <div style={{fontSize:12,color:roiColor,fontWeight:700}}>{s.roi>=0?"+":""}{s.roi.toFixed(2)}% ROI · {s.totalPnl>=0?"+":""}${s.totalPnl.toFixed(2)} P&L</div>
+            <div style={{fontSize:12,color:roiColor,fontWeight:700}}>{s.roi>=0?"+":""}{s.roi.toFixed(2)}% ROI · {s.totalPnl>=0?"+":""}${s.totalPnl.toFixed(2)} Realized{s.unrealizedPnl!==0?` · ${s.unrealizedPnl>=0?"+":""}$${s.unrealizedPnl.toFixed(2)} Open`:""}</div>
           </div>
         </div>
         {/* Equity Curve */}
