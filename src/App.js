@@ -1,5 +1,32 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
+// ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
+function useMobile() {
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => {
+    const fn = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return isMobile;
+}
+// Inject global mobile CSS once
+if (typeof document !== "undefined" && !document.getElementById("atm-mobile-css")) {
+  const s = document.createElement("style");
+  s.id = "atm-mobile-css";
+  s.textContent = `
+    *{box-sizing:border-box;}
+    body{overflow-x:hidden;-webkit-text-size-adjust:100%;}
+    ::-webkit-scrollbar{width:4px;height:4px;}
+    ::-webkit-scrollbar-track{background:#080e1a;}
+    ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:2px;}
+    @media(max-width:768px){
+      input,button,select{font-size:16px!important;}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
@@ -537,6 +564,27 @@ function Section({title,children}){
     <div style={{fontSize:9,color:"#2a5a7a",letterSpacing:2,marginBottom:8,borderBottom:"1px solid #0f1e2e",paddingBottom:5,fontWeight:700}}>{title}</div>
     {children}
   </div>;
+}
+// Mobile-friendly collapsible settings panel
+function MobileSettingsPanel({width=250, children, style={}}){
+  const isMobile = useMobile();
+  const [open, setOpen] = useState(false);
+  if(!isMobile){
+    return <div style={{width,minWidth:width,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto",...style}}>{children}</div>;
+  }
+  return(
+    <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",...style}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:"#00b4d8",fontFamily:"'Courier New',monospace",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <span>⚙️ SETTINGS</span>
+        <span style={{fontSize:14}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&(
+        <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:12,borderTop:"1px solid #1e3a5a"}}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }
 function Stat({label,value,color="#c9d8e8"}){
   return <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -1598,7 +1646,7 @@ function ChartTab({trades, initialSym}) {
       </div>
 
       {/* MAIN AREA */}
-      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+      <div style={{flex:1,display:"flex",overflow:"hidden",flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
 
         {/* TRADINGVIEW CHART — YOUR ACCOUNT */}
         <div style={{flex:1,position:"relative",overflow:"hidden"}}>
@@ -1624,7 +1672,7 @@ function ChartTab({trades, initialSym}) {
         </div>
 
         {/* RIGHT PANEL — Trade Review */}
-        <div style={{width:250,minWidth:250,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{width:typeof window!=="undefined"&&window.innerWidth<768?"100%":250,minWidth:typeof window!=="undefined"&&window.innerWidth<768?0:250,background:"#080e1a",borderLeft:typeof window!=="undefined"&&window.innerWidth<768?"none":"1px solid #1e3a5a",borderTop:typeof window!=="undefined"&&window.innerWidth<768?"1px solid #1e3a5a":"none",display:"flex",flexDirection:"column",overflow:"hidden",maxHeight:typeof window!=="undefined"&&window.innerWidth<768?"40vh":"none"}}>
 
           {/* Selected trade detail */}
           {selectedTrade&&(
@@ -1821,8 +1869,8 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
   const sel=selRow!==null?results[selRow]:null;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="EMA PERIODS">
           {[["EMA 1 (Fast)",ema1,setEma1],["EMA 2 (Mid)",ema2,setEma2],["EMA 3 (Slow)",ema3,setEma3]].map(([l,v,s])=>(
             <div key={l} style={{marginBottom:9}}>
@@ -1878,7 +1926,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"▶ RUN EMA SCAN"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -1893,7 +1941,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>{lastScan?"No results matched filter.":"Press ▶ RUN EMA SCAN"}</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE","EMA1","EMA2","EMA3","SPREAD%","SLOPE","STRENGTH","BOUNCE","REJECT","SWING★","TREND","SCORE"].map(h=>
                   <th key={h} style={{padding:"7px 7px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -1926,7 +1974,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
         {sel&&(
@@ -2038,8 +2086,8 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
   const fullyAligned=results.filter(r=>r.aligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -2102,7 +2150,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SCAN ${direction}`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -2115,7 +2163,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SCAN to find HalfTrend signals</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()} BIAS`,`${tf2.toUpperCase()} CONFIRM`,`${tf3.toUpperCase()} ENTRY`,`${tf4.toUpperCase()} FINE`,"MATCH","REL VOL","ATR%","EMA DIST","SCORE","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -2192,7 +2240,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -2267,8 +2315,8 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
   const fullyAligned=results.filter(r=>r.fullyAligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -2329,7 +2377,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SHA+HT ${direction} SCAN`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -2342,7 +2390,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SHA+HT SCAN to find signals</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()}`,`${tf2.toUpperCase()}`,`${tf3.toUpperCase()}`,`${tf4.toUpperCase()}`,"MATCH","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -2387,7 +2435,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -2549,9 +2597,9 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
   const longs  = results.filter(r=>r.longReversal).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
       {/* LEFT PANEL */}
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+      <MobileSettingsPanel>
         <Section title="TIMEFRAMES">
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <TFInput label="TF1 (Gap chart)" value={tf1} onChange={setTf1}/>
@@ -2616,7 +2664,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"🎯 SCAN REVERSALS"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.slice(0,5).join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
 
       {/* RIGHT PANEL */}
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
@@ -2655,7 +2703,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
             </div>
           )}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead>
                 <tr style={{background:"#0a1520",position:"sticky",top:0,zIndex:1}}>
                   {["SYMBOL","TF","PRICE","200 EMA","EMA DIST %","GAP %","DIRECTION","CANDLES AGO","SCORE","ACTION"].map(h=>(
@@ -2730,7 +2778,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -2806,53 +2854,60 @@ export default function App(){
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
   ];
 
+  const isMobile = useMobile();
   const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion, goToChart};
 
   return(
-    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column",maxWidth:"100vw",overflowX:"hidden"}}>
       {/* HEADER */}
-      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,transition:"all 0.3s"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:10,height:10,borderRadius:"50%",background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
-          <span style={{fontSize:15,fontWeight:700,color:"#e8f4ff",letterSpacing:2}}>ALO TRADING SCANNER</span>
-          <span style={{fontSize:10,color:"#ff9800",padding:"2px 8px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
-          {flashAlert&&<span style={{fontSize:11,color:"#ff9800",fontWeight:700,animation:"pulse 0.5s infinite"}}>🚨 SIGNAL FIRED!</span>}
+      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:isMobile?"8px 10px":"10px 20px",display:"flex",flexDirection:"column",gap:6,transition:"all 0.3s"}}>
+        {/* Row 1: Logo */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
+            <span style={{fontSize:isMobile?11:15,fontWeight:700,color:"#e8f4ff",letterSpacing:isMobile?1:2}}>ALO TRADING SCANNER</span>
+            <span style={{fontSize:9,color:"#ff9800",padding:"2px 6px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
+            {flashAlert&&<span style={{fontSize:10,color:"#ff9800",fontWeight:700}}>🚨 SIGNAL!</span>}
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:700,flexWrap:"wrap"}}>
+        {/* Row 2: Watchlist */}
+        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
           <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1,whiteSpace:"nowrap"}}>WATCHLIST</span>
-          {/* Preset dropdown */}
           <select onChange={e=>{if(e.target.value)updateSymbols(WATCHLIST_PRESETS[e.target.value].join(","));e.target.value="";}}
-            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
-            <option value="">📋 Load Preset...</option>
-            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k} ({WATCHLIST_PRESETS[k].length})</option>)}
+            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none",maxWidth:isMobile?130:200}}>
+            <option value="">📋 Preset...</option>
+            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k}</option>)}
           </select>
           <input value={symbols} onChange={e=>updateSymbols(e.target.value)}
-            style={{flex:1,minWidth:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length} stocks</span>
-          {/* Live filter */}
-          <div style={{display:"flex",alignItems:"center",gap:4}}>
-            <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
-              style={{width:45,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-            <span style={{fontSize:9,color:"#2a5a7a"}}>$ min</span>
-            <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
-              style={{width:65,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-            <span style={{fontSize:9,color:"#2a5a7a"}}>vol min</span>
-            <button onClick={runFilter} disabled={filtering}
-              style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-              {filtering?"⏳ "+filterProg:"🔍 FILTER"}
-            </button>
-            {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
-          </div>
+            style={{flex:1,minWidth:isMobile?80:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 8px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length}&#x2009;stk</span>
+        </div>
+        {/* Row 3: Filter */}
+        <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+          <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
+            style={{width:48,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+          <span style={{fontSize:9,color:"#2a5a7a"}}>$min</span>
+          <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
+            style={{width:60,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+          <span style={{fontSize:9,color:"#2a5a7a"}}>vol</span>
+          <button onClick={runFilter} disabled={filtering}
+            style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+            {filtering?"⏳ "+filterProg:"🔍 FILTER"}
+          </button>
+          {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
         </div>
       </div>
 
-      {/* TABS */}
-      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex"}}>
+      {/* TABS — scrollable on mobile */}
+      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
         {tabs.map(tab=>(
-          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{padding:"10px 18px",fontFamily:"inherit",fontSize:11,fontWeight:700,letterSpacing:1,
+          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{
+            padding:isMobile?"10px 10px":"10px 18px",
+            fontFamily:"inherit",fontSize:isMobile?9:11,fontWeight:700,letterSpacing:isMobile?0:1,
             background:activeTab===tab.id?"#0d1e30":"transparent",
             borderBottom:activeTab===tab.id?`2px solid ${tab.color}`:"2px solid transparent",
-            color:activeTab===tab.id?tab.color:"#3a6e9a",border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap"}}>
+            color:activeTab===tab.id?tab.color:"#3a6e9a",
+            border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap",flexShrink:0}}>
             {tab.label}
           </button>
         ))}
@@ -2860,13 +2915,8 @@ export default function App(){
 
       {/* CONTENT */}
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-        {/* LEFT RAIL — Alert settings + Signal Log (always visible) */}
-        {activeTab!=="pnl"&&(
-          <div style={{width:0,minWidth:0,display:"none"}}/>
-        )}
-
         {/* SCANNER AREA */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           {activeTab==="ema"&&<EMAScanner {...scannerProps}/>}
           {activeTab==="ht"&&<HalfTrendScanner {...scannerProps}/>}
           {activeTab==="shaht"&&<SHAHTScanner {...scannerProps}/>}
@@ -2883,7 +2933,8 @@ export default function App(){
           )}
         </div>
 
-        {/* RIGHT SIDEBAR — Always visible */}
+        {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
+        {!isMobile&&(
         <div style={{width:220,minWidth:220,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
           <AlertSettings
             pushKey={pushKey} setPushKey={setPushKey}
@@ -2893,6 +2944,7 @@ export default function App(){
           />
           <SignalLogPanel logVersion={logVersion}/>
         </div>
+        )}
       </div>
 
       <style>{`
@@ -2902,6 +2954,8 @@ export default function App(){
         ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:3px;}
         input[type=range]{height:4px;}
         @keyframes pulse{0%{opacity:1;}50%{opacity:0.4;}100%{opacity:1;}}
+        /* hide scrollbar on tab bar */
+        div::-webkit-scrollbar:horizontal{height:0;}
       `}</style>
     </div>
   );
