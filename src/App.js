@@ -1516,6 +1516,129 @@ function BondoFund() {
 }
 
 
+// ─── SPIKE SCANNER ────────────────────────────────────────────────────────────
+function SpikeScanner() {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const [minPrice, setMinPrice] = useState(5);
+  const [minVol, setMinVol] = useState(700000);
+  const [minPct, setMinPct] = useState(2);
+  const [minVolMult, setMinVolMult] = useState(2);
+  const [direction, setDirection] = useState("BOTH");
+  const [sortBy, setSortBy] = useState("pct");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const timerRef = useRef(null);
+
+  const scan = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=${API_KEY}&include_otc=false`);
+      const data = await res.json();
+      const tickers = data.tickers || [];
+      const filtered = tickers.filter(t => {
+        const price = t.day?.c || 0;
+        const avgVol = t.prevDay?.v || 1;
+        const pct = t.todaysChangePerc || 0;
+        const volMult = (t.day?.v || 0) / avgVol;
+        if (price < minPrice) return false;
+        if (avgVol < minVol) return false;
+        if (Math.abs(pct) < minPct) return false;
+        if (volMult < minVolMult) return false;
+        if (direction === "UP" && pct <= 0) return false;
+        if (direction === "DOWN" && pct >= 0) return false;
+        return true;
+      }).map(t => ({
+        symbol: t.ticker, price: t.day?.c||0, pct: t.todaysChangePerc||0,
+        vol: t.day?.v||0, avgVol: t.prevDay?.v||0,
+        volMult: (t.day?.v||0)/(t.prevDay?.v||1),
+        high: t.day?.h||0, low: t.day?.l||0,
+      }));
+      filtered.sort((a,b) => sortBy==="pct"?Math.abs(b.pct)-Math.abs(a.pct):sortBy==="vol"?b.volMult-a.volMult:b.price-a.price);
+      setResults(filtered.slice(0,100));
+      setLastScan(new Date().toLocaleTimeString());
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (autoRefresh) { timerRef.current = setInterval(scan, 60000); }
+    else { clearInterval(timerRef.current); }
+    return () => clearInterval(timerRef.current);
+  }, [autoRefresh, minPrice, minVol, minPct, minVolMult, direction, sortBy]);
+
+  const fmt = n => n>=1000000?(n/1000000).toFixed(1)+"M":n>=1000?(n/1000).toFixed(0)+"K":String(n);
+
+  return (
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
+      <div style={{maxWidth:900,margin:"0 auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
+            <div style={{fontSize:16,fontWeight:700}}>⚡ Spike Scanner</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {lastScan&&<span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
+            <button onClick={()=>setAutoRefresh(a=>!a)} style={{padding:"5px 10px",background:autoRefresh?"#00e67622":"#0d1e30",border:`1px solid ${autoRefresh?"#00e676":"#1e3a5a"}`,borderRadius:5,color:autoRefresh?"#00e676":"#3a6e9a",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>{autoRefresh?"⏸ AUTO ON":"▶ AUTO OFF"}</button>
+            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading?"SCANNING...":"⚡ SCAN NOW"}</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
+          {[["Min Price $",minPrice,setMinPrice,1,500,1],["Min Avg Vol",minVol,setMinVol,100000,5000000,100000],["Min % Move",minPct,setMinPct,0.5,20,0.5],["Min Vol Mult",minVolMult,setMinVolMult,1,10,0.5]].map(([label,val,setter,min,max,step])=>(
+            <div key={label}>
+              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>{label}</div>
+              <input type="number" value={val} min={min} max={max} step={step} onChange={e=>setter(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+            </div>
+          ))}
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>DIRECTION</div>
+            <select value={direction} onChange={e=>setDirection(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="BOTH">Both</option><option value="UP">Up only</option><option value="DOWN">Down only</option>
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>SORT BY</div>
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="pct">% Move</option><option value="vol">Vol Mult</option><option value="price">Price</option>
+            </select>
+          </div>
+        </div>
+        {results.length>0&&<div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+          {[["SPIKES",results.length,"#e8f4ff"],["UP",results.filter(r=>r.pct>0).length,"#00e676"],["DOWN",results.filter(r=>r.pct<0).length,"#ff5252"],["AVG MOVE",(results.reduce((s,r)=>s+Math.abs(r.pct),0)/results.length).toFixed(1)+"%","#f59e0b"]].map(([l,v,c])=>(
+            <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+              <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+              <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+            </div>
+          ))}
+        </div>}
+        {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>⚡ Scanning entire US market...</div>}
+        {!loading&&results.length===0&&lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No spikes matched. Try lowering filters.</div>}
+        {!loading&&!lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>Press ⚡ SCAN NOW to find spikes across Russell 3000+</div>}
+        {results.length>0&&<div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+            <thead><tr style={{borderBottom:"1px solid #1e3a5a"}}>
+              {["SYMBOL","PRICE","% MOVE","VOLUME","VOL MULT","HIGH","LOW"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>)}
+            </tr></thead>
+            <tbody>{results.map((r,i)=>{
+              const up=r.pct>=0;
+              return <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={()=>window.open(`https://finance.yahoo.com/quote/${r.symbol}`,"_blank")}>
+                <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
+                <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
+                <td style={{padding:"7px 8px"}}><span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:`1px solid ${up?"#00e67644":"#ff525244"}`,borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up?"+":""}{r.pct.toFixed(2)}%</span></td>
+                <td style={{padding:"7px 8px"}}>{fmt(r.vol)}</td>
+                <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
+                <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.high.toFixed(2)}</td>
+                <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.low.toFixed(2)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+
 // ─── GAP SCANNER ─────────────────────────────────────────────────────────────
 function GapScanner() {
   const [results, setResults] = useState([]);
@@ -3306,6 +3429,7 @@ export default function App(){
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
     {id:"pattern",label:"🔍 PATTERN AI",color:"#00e676"},
+    {id:"spike",label:"⚡ SPIKE",color:"#f59e0b"},
     {id:"gap",label:"🌅 GAP",color:"#38bdf8"},
   ];
 
@@ -3391,6 +3515,7 @@ export default function App(){
               <ChartPatternAnalyzer/>
             </div>
           )}
+          {activeTab==="spike"&&<SpikeScanner/>}
           {activeTab==="gap"&&<GapScanner/>}
         </div>
 
