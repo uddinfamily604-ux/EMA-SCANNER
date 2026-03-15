@@ -2464,7 +2464,7 @@ function PreMarketHODLOD() {
 
 
 // ─── FINANCIAL ASTROLOGY ──────────────────────────────────────────────────────
-function FinancialAstrology() {
+function FinancialAstrology({goToHTScanner}) {
   const [symbol, setSymbol] = useState("NKE");
   const [inputSym, setInputSym] = useState("NKE");
   const [result, setResult] = useState(null);
@@ -3004,6 +3004,28 @@ function FinancialAstrology() {
 
             {!scanning&&filteredScan.length>0&&(
               <div>
+                {/* HT Scanner Buttons */}
+                {goToHTScanner&&<div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                  <button onClick={()=>{
+                    const bullSyms = scanResults.filter(r=>r.score>=2).map(r=>r.symbol);
+                    if(bullSyms.length>0) goToHTScanner(bullSyms);
+                  }} style={{padding:"7px 14px",background:"#00e67622",border:"1px solid #00e67666",borderRadius:6,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9650; SCAN BULLISH IN HALFTREND ({scanResults.filter(r=>r.score>=2).length} stocks)
+                  </button>
+                  <button onClick={()=>{
+                    const bearSyms = scanResults.filter(r=>r.score<=-2).map(r=>r.symbol);
+                    if(bearSyms.length>0) goToHTScanner(bearSyms);
+                  }} style={{padding:"7px 14px",background:"#ff525222",border:"1px solid #ff525266",borderRadius:6,color:"#ff5252",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9660; SCAN BEARISH IN HALFTREND ({scanResults.filter(r=>r.score<=-2).length} stocks)
+                  </button>
+                  <button onClick={()=>{
+                    const strongSyms = scanResults.filter(r=>Math.abs(r.score)>=4).map(r=>r.symbol);
+                    if(strongSyms.length>0) goToHTScanner(strongSyms);
+                  }} style={{padding:"7px 14px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9889; STRONG SIGNALS ONLY ({scanResults.filter(r=>Math.abs(r.score)>=4).length} stocks)
+                  </button>
+                </div>}
+
                 {/* Summary stats */}
                 <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
                   {[
@@ -4375,6 +4397,7 @@ export default function App(){
   };
 
   const goToChart=(sym)=>{ setChartSym(sym); updateTab("chart"); };
+  const goToHTScanner=(symList)=>{ setSymbols(symList.join(",")); updateTab("ht"); };
 
   const handleSignal = useCallback(()=>{
     setLogVersion(n=>n+1);
@@ -4494,7 +4517,7 @@ export default function App(){
           {activeTab==="gap"&&<GapScanner/>}
           {activeTab==="breadth"&&<MarketBreadth/>}
           {activeTab==="premarket"&&<PreMarketHODLOD/>}
-          {activeTab==="astro"&&<FinancialAstrology/>}
+          {activeTab==="astro"&&<FinancialAstrology goToHTScanner={goToHTScanner}/>}
         </div>
 
         {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
