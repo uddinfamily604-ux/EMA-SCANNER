@@ -2051,6 +2051,409 @@ function ChartPatternAnalyzer() {
   );
 }
 
+
+// ─── FINANCIAL ASTROLOGY ──────────────────────────────────────────────────────
+function FinancialAstrology() {
+  const [symbol, setSymbol] = useState("NKE");
+  const [inputSym, setInputSym] = useState("NKE");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [scanResults, setScanResults] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [activeView, setActiveView] = useState("single");
+  const [scanFilter, setScanFilter] = useState("ALL");
+
+  // ── IPO Database (Top 50 S&P 500 + key ETFs) ──────────────────────────────
+  const IPO_DB = {
+    // Mega caps
+    AAPL: {date:[1980,12,12], name:"Apple"},
+    MSFT: {date:[1986,3,13],  name:"Microsoft"},
+    NVDA: {date:[1999,1,22],  name:"Nvidia"},
+    AMZN: {date:[1997,5,15],  name:"Amazon"},
+    GOOGL:{date:[2004,8,19],  name:"Alphabet"},
+    META: {date:[2012,5,18],  name:"Meta"},
+    TSLA: {date:[2010,6,29],  name:"Tesla"},
+    NFLX: {date:[2002,5,23],  name:"Netflix"},
+    BRKB: {date:[1996,5,9],   name:"Berkshire B"},
+    JPM:  {date:[1969,1,2],   name:"JPMorgan"},
+    // Tech
+    AMD:  {date:[1979,9,27],  name:"AMD"},
+    INTC: {date:[1971,10,13], name:"Intel"},
+    CRM:  {date:[2004,6,23],  name:"Salesforce"},
+    ORCL: {date:[1986,3,12],  name:"Oracle"},
+    CSCO: {date:[1990,2,16],  name:"Cisco"},
+    ADBE: {date:[1986,8,20],  name:"Adobe"},
+    PYPL: {date:[2015,7,20],  name:"PayPal"},
+    SQ:   {date:[2015,11,19], name:"Block"},
+    UBER: {date:[2019,5,10],  name:"Uber"},
+    ABNB: {date:[2020,12,10], name:"Airbnb"},
+    SNOW: {date:[2020,9,16],  name:"Snowflake"},
+    PLTR: {date:[2020,9,30],  name:"Palantir"},
+    COIN: {date:[2021,4,14],  name:"Coinbase"},
+    // Finance
+    GS:   {date:[1999,5,4],   name:"Goldman Sachs"},
+    BAC:  {date:[1972,1,3],   name:"Bank of America"},
+    WFC:  {date:[1970,1,2],   name:"Wells Fargo"},
+    MS:   {date:[1986,3,21],  name:"Morgan Stanley"},
+    V:    {date:[2008,3,19],  name:"Visa"},
+    MA:   {date:[2006,5,25],  name:"Mastercard"},
+    // Consumer
+    NKE:  {date:[1980,12,2],  name:"Nike"},
+    SBUX: {date:[1992,6,26],  name:"Starbucks"},
+    MCD:  {date:[1966,4,21],  name:"McDonald's"},
+    KO:   {date:[1919,9,5],   name:"Coca-Cola"},
+    PEP:  {date:[1972,6,1],   name:"PepsiCo"},
+    WMT:  {date:[1972,8,25],  name:"Walmart"},
+    TGT:  {date:[1967,2,8],   name:"Target"},
+    AMGN: {date:[1983,6,17],  name:"Amgen"},
+    // Healthcare
+    JNJ:  {date:[1944,9,25],  name:"J&J"},
+    PFE:  {date:[1944,1,3],   name:"Pfizer"},
+    MRNA: {date:[2018,12,6],  name:"Moderna"},
+    UNH:  {date:[1984,10,17], name:"UnitedHealth"},
+    // Energy
+    XOM:  {date:[1920,3,1],   name:"ExxonMobil"},
+    CVX:  {date:[1925,1,2],   name:"Chevron"},
+    // ETFs
+    SPY:  {date:[1993,1,22],  name:"S&P 500 ETF"},
+    QQQ:  {date:[1999,3,10],  name:"Nasdaq ETF"},
+    IWM:  {date:[2000,5,22],  name:"Russell 2000"},
+    GLD:  {date:[2004,11,18], name:"Gold ETF"},
+    // Crypto adjacent
+    MARA: {date:[2012,6,26],  name:"Marathon Digital"},
+    MSTR: {date:[1998,6,11],  name:"MicroStrategy"},
+    // Retail favorites
+    SOFI: {date:[2021,6,1],   name:"SoFi"},
+    RIVN: {date:[2021,11,10], name:"Rivian"},
+    BABA: {date:[2014,9,19],  name:"Alibaba"},
+  };
+
+  // ── Astronomy Engine ───────────────────────────────────────────────────────
+  const julianDay = (y,m,d) => {
+    if (m<=2){y--;m+=12;}
+    const A=Math.floor(y/100), B=2-A+Math.floor(A/4);
+    return Math.floor(365.25*(y+4716))+Math.floor(30.6001*(m+1))+d+B-1524.5;
+  };
+  const norm360 = d => ((d%360)+360)%360;
+  const sunLon = jd => { const n=jd-2451545,L=norm360(280.46+0.9856474*n),g=norm360(357.528+0.9856003*n)*Math.PI/180; return norm360(L+1.915*Math.sin(g)+0.02*Math.sin(2*g)); };
+  const moonLon = jd => { const n=jd-2451545,L=norm360(218.316+13.176396*n),M=norm360(134.963+13.064993*n)*Math.PI/180,F=norm360(93.272+13.22935*n)*Math.PI/180; return norm360(L+6.289*Math.sin(M)-1.274*Math.sin(2*F-M)+0.658*Math.sin(2*F)-0.186*Math.sin(2*M)); };
+  const planetLon = (jd,p) => {
+    const T=(jd-2451545)/36525;
+    const pl={mercury:{L0:252.250906,L1:149472.6746},venus:{L0:181.979801,L1:58517.8157},mars:{L0:355.433,L1:19140.2993},jupiter:{L0:34.351519,L1:3034.9057},saturn:{L0:50.077444,L1:1222.1138},uranus:{L0:314.055005,L1:428.467},neptune:{L0:304.348665,L1:218.4862},pluto:{L0:238.928881,L1:145.183}};
+    return norm360(pl[p].L0+pl[p].L1*T/100);
+  };
+  const getAll = (y,m,d) => {
+    const jd=julianDay(y,m,d);
+    return {sun:sunLon(jd),moon:moonLon(jd),mercury:planetLon(jd,'mercury'),venus:planetLon(jd,'venus'),mars:planetLon(jd,'mars'),jupiter:planetLon(jd,'jupiter'),saturn:planetLon(jd,'saturn'),uranus:planetLon(jd,'uranus'),neptune:planetLon(jd,'neptune'),pluto:planetLon(jd,'pluto')};
+  };
+  const signName = d => ["♈Aries","♉Taurus","♊Gemini","♋Cancer","♌Leo","♍Virgo","♎Libra","♏Scorpio","♐Sagittarius","♑Capricorn","♒Aquarius","♓Pisces"][Math.floor(d/30)];
+
+  const ASPECTS = [[0,8,"Conjunction","intense"],[60,6,"Sextile","positive"],[90,7,"Square","tense"],[120,8,"Trine","positive"],[150,5,"Quincunx","mixed"],[180,8,"Opposition","tense"]];
+  const PW = {sun:8,moon:6,mercury:5,venus:7,mars:6,jupiter:9,saturn:8,uranus:5,neptune:4,pluto:5};
+
+  const analyzeStock = (ipoDate, transitDate) => {
+    const natal = getAll(...ipoDate);
+    const transit = getAll(...transitDate);
+    const aspects = [];
+    let totalScore = 0;
+
+    for (const [tP, tDeg] of Object.entries(transit)) {
+      for (const [nP, nDeg] of Object.entries(natal)) {
+        const diff = Math.abs(norm360(tDeg-nDeg));
+        const angle = diff>180?360-diff:diff;
+        for (const [aspAngle,orb,aspName,nature] of ASPECTS) {
+          if (Math.abs(angle-aspAngle)<=orb) {
+            const exactness = 1-Math.abs(angle-aspAngle)/orb;
+            const baseScore = nature==="positive"?1:nature==="tense"?-1:0.2;
+            const score = baseScore*((PW[tP]+PW[nP])/14)*exactness;
+            totalScore += score;
+            if (exactness>0.4) {
+              aspects.push({transit:tP,natal:nP,aspect:aspName,nature,score,exactness,tDeg,nDeg,tSign:signName(tDeg),nSign:signName(nDeg)});
+            }
+          }
+        }
+      }
+    }
+    aspects.sort((a,b)=>Math.abs(b.score)-Math.abs(a.score));
+    const normalized = Math.max(-10,Math.min(10,(totalScore/5)*10));
+    const verdict = normalized>=4?"STRONG BULL":normalized>=2?"BULLISH":normalized<=-4?"STRONG BEAR":normalized<=-2?"BEARISH":"NEUTRAL";
+    const verdictColor = normalized>=4?"#00e676":normalized>=2?"#38bdf8":normalized<=-4?"#ff1744":normalized<=-2?"#ff5252":"#f59e0b";
+
+    // Moon phase
+    const moonPhase = getMoonPhase(...transitDate);
+
+    return {score:normalized,verdict,verdictColor,aspects:aspects.slice(0,8),natal,transit,moonPhase};
+  };
+
+  const getMoonPhase = (y,m,d) => {
+    const jd = julianDay(y,m,d);
+    const phase = ((jd-2451550.1)/29.530588)%1;
+    const normalized = ((phase%1)+1)%1;
+    if (normalized<0.0625||normalized>=0.9375) return {name:"New Moon",symbol:"🌑",energy:"New beginnings, fresh starts"};
+    if (normalized<0.1875) return {name:"Waxing Crescent",symbol:"🌒",energy:"Building momentum, accumulation"};
+    if (normalized<0.3125) return {name:"First Quarter",symbol:"🌓",energy:"Action, decision point"};
+    if (normalized<0.4375) return {name:"Waxing Gibbous",symbol:"🌔",energy:"Growth, refinement"};
+    if (normalized<0.5625) return {name:"Full Moon",symbol:"🌕",energy:"Peak energy, high volatility"};
+    if (normalized<0.6875) return {name:"Waning Gibbous",symbol:"🌖",energy:"Distribution, profit taking"};
+    if (normalized<0.8125) return {name:"Last Quarter",symbol:"🌗",energy:"Release, correction phase"};
+    return {name:"Waning Crescent",symbol:"🌘",energy:"Rest, consolidation"};
+  };
+
+  const now = new Date();
+  const TODAY = [now.getFullYear(), now.getMonth()+1, now.getDate()];
+
+  const analyze = (sym) => {
+    const s = sym.toUpperCase().trim();
+    const stock = IPO_DB[s];
+    if (!stock) {
+      setResult({error: "Stock not in database yet. We're adding more daily!"});
+      return;
+    }
+    setLoading(true);
+    setTimeout(() => {
+      const r = analyzeStock(stock.date, TODAY);
+      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date});
+      setLoading(false);
+    }, 100);
+  };
+
+  const scanAll = () => {
+    setScanning(true);
+    setTimeout(() => {
+      const results = Object.entries(IPO_DB).map(([sym, info]) => {
+        const r = analyzeStock(info.date, TODAY);
+        return {symbol:sym, name:info.name, score:r.score, verdict:r.verdict, verdictColor:r.verdictColor};
+      });
+      results.sort((a,b) => b.score-a.score);
+      setScanResults(results);
+      setScanning(false);
+    }, 200);
+  };
+
+  const filteredScan = scanResults.filter(r => {
+    if (scanFilter==="BULL") return r.score>=2;
+    if (scanFilter==="BEAR") return r.score<=-2;
+    if (scanFilter==="STRONG") return Math.abs(r.score)>=4;
+    return true;
+  });
+
+  const scoreBar = (score) => {
+    const pct = ((score+10)/20)*100;
+    const color = score>=4?"#00e676":score>=2?"#38bdf8":score<=-4?"#ff1744":score<=-2?"#ff5252":"#f59e0b";
+    return (
+      <div style={{marginTop:6}}>
+        <div style={{height:6,background:"#1e3a5a",borderRadius:3,position:"relative"}}>
+          <div style={{position:"absolute",left:"50%",top:0,width:1,height:"100%",background:"#2a5a7a"}}/>
+          <div style={{height:"100%",width:pct+"%",background:color,borderRadius:3,transition:"width 0.8s ease"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#3a6e9a",marginTop:2}}>
+          <span>BEARISH -10</span><span>NEUTRAL 0</span><span>BULLISH +10</span>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
+      <div style={{maxWidth:900,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
+          <div style={{fontSize:16,fontWeight:700}}>&#127756; Financial Astrology</div>
+          <div style={{fontSize:10,color:"#3a6e9a"}}>Stock natal chart analysis · Planetary transit energy</div>
+        </div>
+
+        {/* View toggle */}
+        <div style={{display:"flex",gap:4,marginBottom:14,background:"#0d1e30",borderRadius:6,padding:4}}>
+          {[["single","&#128269; Single Stock"],["scan","&#128202; Scan All 50"]].map(([id,label]) => (
+            <button key={id} onClick={()=>{setActiveView(id);if(id==="scan"&&scanResults.length===0)scanAll();}} style={{flex:1,padding:"7px 0",background:activeView===id?"#080e1a":"transparent",border:activeView===id?"1px solid #e040fb44":"1px solid transparent",borderRadius:4,color:activeView===id?"#e040fb":"#3a6e9a",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}} dangerouslySetInnerHTML={{__html:label}}/>
+          ))}
+        </div>
+
+        {/* ── SINGLE STOCK VIEW ── */}
+        {activeView==="single"&&(
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <input
+                value={inputSym}
+                onChange={e=>setInputSym(e.target.value.toUpperCase())}
+                onKeyDown={e=>{if(e.key==="Enter"){setSymbol(inputSym);analyze(inputSym);}}}
+                placeholder="Type ticker... AAPL, NKE, SPY..."
+                style={{flex:1,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,color:"#e8f4ff",padding:"10px 14px",fontSize:13,fontFamily:"monospace"}}
+              />
+              <button onClick={()=>{setSymbol(inputSym);analyze(inputSym);}} style={{padding:"10px 20px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>ANALYZE</button>
+            </div>
+
+            {/* Quick picks */}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+              {["SPY","QQQ","AAPL","NVDA","TSLA","NKE","MSFT","META","AMZN","COIN","PLTR","MARA"].map(s=>(
+                <button key={s} onClick={()=>{setInputSym(s);setSymbol(s);analyze(s);}} style={{padding:"3px 10px",background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:4,color:"#3a6e9a",fontSize:10,cursor:"pointer",fontFamily:"monospace"}}>{s}</button>
+              ))}
+            </div>
+
+            {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Reading planetary positions...</div>}
+
+            {result&&result.error&&(
+              <div style={{background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:8,padding:16,color:"#f59e0b",fontSize:13}}>{result.error}</div>
+            )}
+
+            {result&&!result.error&&(
+              <div>
+                {/* Main verdict card */}
+                <div style={{background:"#0d1e30",border:"2px solid "+result.verdictColor+"44",borderRadius:10,padding:"20px",marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+                    <div>
+                      <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>PLANETARY ENERGY</div>
+                      <div style={{fontSize:22,fontWeight:700,color:"#e8f4ff"}}>{result.symbol} — {result.name}</div>
+                      <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]} · Today: {TODAY[2]}/{TODAY[1]}/{TODAY[0]}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:28,fontWeight:700,color:result.verdictColor}}>{result.score.toFixed(1)}</div>
+                      <div style={{fontSize:10,color:"#3a6e9a"}}>/ 10</div>
+                    </div>
+                  </div>
+                  <div style={{marginTop:14,background:result.verdictColor+"22",border:"1px solid "+result.verdictColor+"44",borderRadius:6,padding:"10px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:18,fontWeight:700,color:result.verdictColor}}>{result.verdict}</div>
+                  </div>
+                  {scoreBar(result.score)}
+                </div>
+
+                {/* Moon phase */}
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:14}}>
+                  <div style={{fontSize:28}}>{result.moonPhase.symbol}</div>
+                  <div>
+                    <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>MOON PHASE TODAY</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{result.moonPhase.name}</div>
+                    <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>{result.moonPhase.energy}</div>
+                  </div>
+                </div>
+
+                {/* Key aspects */}
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>ACTIVE PLANETARY ASPECTS (Transit → Natal)</div>
+                  {result.aspects.map((a,i)=>{
+                    const isPos = a.score>=0;
+                    const c = isPos?"#00e676":a.nature==="tense"?"#ff5252":"#f59e0b";
+                    return (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #0d2030"}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:c,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <span style={{color:"#38bdf8",fontWeight:700}}>{a.transit}</span>
+                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>in {a.tSign}</span>
+                          <span style={{color:c,fontWeight:700}}>{a.aspect}</span>
+                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>natal</span>
+                          <span style={{color:"#e8f4ff",fontWeight:700}}>{a.natal}</span>
+                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>in {a.nSign}</span>
+                        </div>
+                        <div style={{color:c,fontSize:11,fontWeight:700,flexShrink:0}}>{isPos?"+":""}{a.score.toFixed(2)}</div>
+                        <div style={{fontSize:9,color:"#3a6e9a",flexShrink:0}}>{(a.exactness*100).toFixed(0)}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Today's transiting planets */}
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>TODAY'S PLANETARY POSITIONS</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+                    {Object.entries(result.transit).map(([p,deg])=>(
+                      <div key={p} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:5,padding:"6px 10px"}}>
+                        <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2,textTransform:"uppercase"}}>{p}</div>
+                        <div style={{fontSize:11,fontWeight:700,color:"#e8f4ff"}}>{deg.toFixed(1)}°</div>
+                        <div style={{fontSize:9,color:"#3a6e9a"}}>{signName(deg)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Natal planets */}
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>{result.symbol} NATAL CHART (IPO DATE)</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+                    {Object.entries(result.natal).map(([p,deg])=>(
+                      <div key={p} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:5,padding:"6px 10px"}}>
+                        <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2,textTransform:"uppercase"}}>{p}</div>
+                        <div style={{fontSize:11,fontWeight:700,color:"#e8f4ff"}}>{deg.toFixed(1)}°</div>
+                        <div style={{fontSize:9,color:"#3a6e9a"}}>{signName(deg)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SCAN ALL VIEW ── */}
+        {activeView==="scan"&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {[["ALL","ALL"],["BULL","BULLISH"],["BEAR","BEARISH"],["STRONG","STRONG ONLY"]].map(([f,l])=>(
+                  <button key={f} onClick={()=>setScanFilter(f)} style={{padding:"4px 12px",background:scanFilter===f?"#e040fb22":"#0d1e30",border:"1px solid "+(scanFilter===f?"#e040fb66":"#1e3a5a"),borderRadius:4,color:scanFilter===f?"#e040fb":"#3a6e9a",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{l}</button>
+                ))}
+              </div>
+              <button onClick={scanAll} disabled={scanning} style={{padding:"5px 14px",background:"#e040fb11",border:"1px solid #e040fb55",borderRadius:5,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{scanning?"SCANNING...":"RESCAN ALL"}</button>
+            </div>
+
+            {scanning&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Calculating planetary energy for all 50 stocks...</div>}
+
+            {!scanning&&filteredScan.length>0&&(
+              <div>
+                {/* Summary stats */}
+                <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                  {[
+                    ["BULL",scanResults.filter(r=>r.score>=2).length,"#00e676"],
+                    ["BEAR",scanResults.filter(r=>r.score<=-2).length,"#ff5252"],
+                    ["NEUTRAL",scanResults.filter(r=>r.score>-2&&r.score<2).length,"#f59e0b"],
+                    ["STRONG BULL",scanResults.filter(r=>r.score>=4).length,"#00e676"],
+                    ["STRONG BEAR",scanResults.filter(r=>r.score<=-4).length,"#ff1744"],
+                  ].map(([l,v,c])=>(
+                    <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+                      <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+                      <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:400}}>
+                    <thead>
+                      <tr style={{borderBottom:"1px solid #1e3a5a"}}>
+                        {["SYMBOL","NAME","SCORE","ENERGY","ACTION"].map(h=>(
+                          <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredScan.map((r,i)=>(
+                        <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}}
+                          onClick={()=>{setInputSym(r.symbol);setSymbol(r.symbol);analyze(r.symbol);setActiveView("single");}}>
+                          <td style={{padding:"7px 8px",fontWeight:700,color:"#38bdf8"}}>{r.symbol}</td>
+                          <td style={{padding:"7px 8px",color:"#3a6e9a",fontSize:10}}>{r.name}</td>
+                          <td style={{padding:"7px 8px"}}>
+                            <span style={{color:r.verdictColor,fontWeight:700}}>{r.score.toFixed(1)}</span>
+                          </td>
+                          <td style={{padding:"7px 8px"}}>
+                            <span style={{background:r.verdictColor+"22",color:r.verdictColor,border:"1px solid "+r.verdictColor+"44",borderRadius:4,padding:"1px 8px",fontSize:10,fontWeight:700}}>{r.verdict}</span>
+                          </td>
+                          <td style={{padding:"7px 8px",fontSize:9,color:"#3a6e9a"}}>click to analyze</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
 // ─── CHART TAB ────────────────────────────────────────────────────────────────
 function ChartTab({trades, initialSym}) {
   const [chartSym, setChartSym] = useState(initialSym||"SPY");
@@ -3393,6 +3796,7 @@ export default function App(){
     {id:"gap",label:"🌅 GAP",color:"#38bdf8"},
     {id:"breadth",label:"🌡️ BREADTH",color:"#e040fb"},
     {id:"premarket",label:"🌙 PRE+HOD",color:"#f59e0b"},
+    {id:"astro",label:"🪐 ASTRO",color:"#e040fb"},
   ];
 
   const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion, goToChart};
@@ -3475,6 +3879,7 @@ export default function App(){
           {activeTab==="gap"&&<GapScanner/>}
           {activeTab==="breadth"&&<MarketBreadth/>}
           {activeTab==="premarket"&&<PreMarketHODLOD/>}
+          {activeTab==="astro"&&<FinancialAstrology/>}
         </div>
 
         {/* RIGHT SIDEBAR — Always visible */}
