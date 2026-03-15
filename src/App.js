@@ -2063,6 +2063,63 @@ function FinancialAstrology() {
   const [activeView, setActiveView] = useState("single");
   const [scanFilter, setScanFilter] = useState("ALL");
 
+
+  // ── CEO Birth Date Database ────────────────────────────────────────────────
+  const CEO_DB = {
+    AAPL: {name:"Tim Cook",        dob:[1960,11,1]},
+    MSFT: {name:"Satya Nadella",   dob:[1967,8,19]},
+    NVDA: {name:"Jensen Huang",    dob:[1963,2,17]},
+    AMZN: {name:"Andy Jassy",      dob:[1968,1,13]},
+    GOOGL:{name:"Sundar Pichai",   dob:[1972,6,10]},
+    META: {name:"Mark Zuckerberg", dob:[1984,5,14]},
+    TSLA: {name:"Elon Musk",       dob:[1971,6,28]},
+    NFLX: {name:"Greg Peters",     dob:[1969,4,1]},
+    BRKB: {name:"Warren Buffett",  dob:[1930,8,30]},
+    JPM:  {name:"Jamie Dimon",     dob:[1956,3,13]},
+    AMD:  {name:"Lisa Su",         dob:[1969,11,7]},
+    INTC: {name:"Pat Gelsinger",   dob:[1961,12,23]},
+    CRM:  {name:"Marc Benioff",    dob:[1964,9,25]},
+    ORCL: {name:"Safra Catz",      dob:[1961,12,1]},
+    CSCO: {name:"Chuck Robbins",   dob:[1966,1,1]},
+    ADBE: {name:"Shantanu Narayen",dob:[1963,5,27]},
+    PYPL: {name:"Alex Chriss",     dob:[1977,1,1]},
+    UBER: {name:"Dara Khosrowshahi",dob:[1969,5,28]},
+    GS:   {name:"David Solomon",   dob:[1962,4,22]},
+    BAC:  {name:"Brian Moynihan",  dob:[1959,10,9]},
+    WFC:  {name:"Charlie Scharf",  dob:[1965,1,1]},
+    MS:   {name:"Ted Pick",        dob:[1969,1,1]},
+    V:    {name:"Ryan McInerney",  dob:[1976,1,1]},
+    MA:   {name:"Michael Miebach", dob:[1970,1,1]},
+    NKE:  {name:"Elliott Hill",    dob:[1969,1,1]},
+    SBUX: {name:"Brian Niccol",    dob:[1974,6,5]},
+    MCD:  {name:"Chris Kempczinski",dob:[1968,11,6]},
+    KO:   {name:"James Quincey",   dob:[1965,1,1]},
+    PEP:  {name:"Ramon Laguarta",  dob:[1964,1,1]},
+    WMT:  {name:"Doug McMillon",   dob:[1966,10,17]},
+    JNJ:  {name:"Joaquin Duato",   dob:[1965,1,1]},
+    PFE:  {name:"Albert Bourla",   dob:[1961,10,21]},
+    MRNA: {name:"Stephane Bancel",  dob:[1972,4,26]},
+    XOM:  {name:"Darren Woods",    dob:[1964,8,1]},
+    CVX:  {name:"Mike Wirth",      dob:[1960,1,1]},
+    SPY:  {name:"State Street",    dob:[1960,1,1]},
+    QQQ:  {name:"Invesco",         dob:[1960,1,1]},
+    COIN: {name:"Brian Armstrong", dob:[1983,1,25]},
+    PLTR: {name:"Alex Karp",       dob:[1967,10,2]},
+    MARA: {name:"Fred Thiel",      dob:[1964,1,1]},
+    MSTR: {name:"Phong Le",        dob:[1976,1,1]},
+    SOFI: {name:"Anthony Noto",    dob:[1969,3,7]},
+    RIVN: {name:"RJ Scaringe",     dob:[1983,9,30]},
+    BABA: {name:"Eddie Wu",        dob:[1974,1,1]},
+    AMGN: {name:"Robert Bradway",  dob:[1963,1,1]},
+    UNH:  {name:"Andrew Witty",    dob:[1964,8,22]},
+    TGT:  {name:"Brian Cornell",   dob:[1961,11,1]},
+    GLD:  {name:"State Street",    dob:[1960,1,1]},
+    IWM:  {name:"iShares",         dob:[1960,1,1]},
+    SQ:   {name:"Jack Dorsey",     dob:[1976,11,19]},
+    ABNB: {name:"Brian Chesky",    dob:[1981,8,29]},
+    SNOW: {name:"Sridhar Ramaswamy",dob:[1971,1,1]},
+  };
+
   // ── IPO Database (Top 50 S&P 500 + key ETFs) ──────────────────────────────
   const IPO_DB = {
     // Mega caps
@@ -2212,7 +2269,19 @@ function FinancialAstrology() {
     setLoading(true);
     setTimeout(() => {
       const r = analyzeStock(stock.date, TODAY);
-      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date});
+      const ceo = CEO_DB[s];
+      let ceoResult = null;
+      if (ceo && ceo.dob) {
+        ceoResult = analyzeStock(ceo.dob, TODAY);
+        ceoResult.ceoName = ceo.name;
+        ceoResult.ceoDob = ceo.dob;
+      }
+      const combinedScore = ceoResult
+        ? Math.max(-10, Math.min(10, r.score * 0.6 + ceoResult.score * 0.4))
+        : r.score;
+      const combinedVerdict = combinedScore >= 4 ? "STRONG BULL" : combinedScore >= 2 ? "BULLISH" : combinedScore <= -4 ? "STRONG BEAR" : combinedScore <= -2 ? "BEARISH" : "NEUTRAL";
+      const combinedColor = combinedScore >= 4 ? "#00e676" : combinedScore >= 2 ? "#38bdf8" : combinedScore <= -4 ? "#ff1744" : combinedScore <= -2 ? "#ff5252" : "#f59e0b";
+      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date, ceoResult, combinedScore, combinedVerdict, combinedColor});
       setLoading(false);
     }, 100);
   };
@@ -2222,7 +2291,15 @@ function FinancialAstrology() {
     setTimeout(() => {
       const results = Object.entries(IPO_DB).map(([sym, info]) => {
         const r = analyzeStock(info.date, TODAY);
-        return {symbol:sym, name:info.name, score:r.score, verdict:r.verdict, verdictColor:r.verdictColor};
+        const ceo = CEO_DB[sym];
+        let combined = r.score;
+        if (ceo && ceo.dob) {
+          const cr = analyzeStock(ceo.dob, TODAY);
+          combined = Math.max(-10, Math.min(10, r.score * 0.6 + cr.score * 0.4));
+        }
+        const verdict = combined >= 4 ? "STRONG BULL" : combined >= 2 ? "BULLISH" : combined <= -4 ? "STRONG BEAR" : combined <= -2 ? "BEARISH" : "NEUTRAL";
+        const verdictColor = combined >= 4 ? "#00e676" : combined >= 2 ? "#38bdf8" : combined <= -4 ? "#ff1744" : combined <= -2 ? "#ff5252" : "#f59e0b";
+        return {symbol:sym, name:info.name, score:combined, stockScore:r.score, verdict, verdictColor};
       });
       results.sort((a,b) => b.score-a.score);
       setScanResults(results);
@@ -2318,6 +2395,50 @@ function FinancialAstrology() {
                   </div>
                   {scoreBar(result.score)}
                 </div>
+
+                {/* CEO Analysis */}
+                {result.ceoResult && (
+                  <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                      <div>
+                        <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>CEO PLANETARY ENERGY</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{result.ceoResult.ceoName}</div>
+                        <div style={{fontSize:10,color:"#3a6e9a"}}>Born: {result.ceoResult.ceoDob[2]}/{result.ceoResult.ceoDob[1]}/{result.ceoResult.ceoDob[0]}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:20,fontWeight:700,color:result.ceoResult.verdictColor}}>{result.ceoResult.score.toFixed(1)}</div>
+                        <div style={{fontSize:9,color:"#3a6e9a"}}>CEO score</div>
+                      </div>
+                    </div>
+                    <div style={{background:result.ceoResult.verdictColor+"22",border:"1px solid "+result.ceoResult.verdictColor+"44",borderRadius:5,padding:"6px 12px",textAlign:"center",marginBottom:10}}>
+                      <span style={{fontSize:13,fontWeight:700,color:result.ceoResult.verdictColor}}>{result.ceoResult.verdict}</span>
+                    </div>
+                    <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:6}}>TOP CEO ASPECTS</div>
+                    {result.ceoResult.aspects.slice(0,3).map((a,i) => {
+                      const isPos = a.score >= 0;
+                      const c = isPos ? "#00e676" : a.nature === "tense" ? "#ff5252" : "#f59e0b";
+                      return (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid #0d2030"}}>
+                          <div style={{width:5,height:5,borderRadius:"50%",background:c,flexShrink:0}}/>
+                          <div style={{flex:1,fontSize:11}}>
+                            <span style={{color:"#38bdf8",fontWeight:700}}>{a.transit}</span>
+                            <span style={{color:"#3a6e9a",margin:"0 4px"}}>in {a.tSign}</span>
+                            <span style={{color:c,fontWeight:700}}>{a.aspect}</span>
+                            <span style={{color:"#3a6e9a",margin:"0 4px"}}>natal</span>
+                            <span style={{color:"#e8f4ff",fontWeight:700}}>{a.natal}</span>
+                          </div>
+                          <div style={{color:c,fontSize:11,fontWeight:700,flexShrink:0}}>{isPos?"+":""}{a.score.toFixed(2)}</div>
+                        </div>
+                      );
+                    })}
+                    {/* Combined score */}
+                    <div style={{marginTop:10,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 14px",textAlign:"center"}}>
+                      <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>COMBINED SCORE (60% Stock + 40% CEO)</div>
+                      <div style={{fontSize:20,fontWeight:700,color:result.combinedColor}}>{result.combinedVerdict}</div>
+                      <div style={{fontSize:14,color:result.combinedColor,marginTop:2}}>{result.combinedScore.toFixed(1)} / 10</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Moon phase */}
                 <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:14}}>
@@ -2421,7 +2542,7 @@ function FinancialAstrology() {
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:400}}>
                     <thead>
                       <tr style={{borderBottom:"1px solid #1e3a5a"}}>
-                        {["SYMBOL","NAME","SCORE","ENERGY","ACTION"].map(h=>(
+                        {["SYMBOL","NAME","COMBINED","STOCK ONLY","ENERGY","ACTION"].map(h=>(
                           <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
                         ))}
                       </tr>
@@ -2435,6 +2556,7 @@ function FinancialAstrology() {
                           <td style={{padding:"7px 8px"}}>
                             <span style={{color:r.verdictColor,fontWeight:700}}>{r.score.toFixed(1)}</span>
                           </td>
+                          <td style={{padding:"7px 8px",color:"#3a6e9a",fontSize:10}}>{r.stockScore ? r.stockScore.toFixed(1) : r.score.toFixed(1)}</td>
                           <td style={{padding:"7px 8px"}}>
                             <span style={{background:r.verdictColor+"22",color:r.verdictColor,border:"1px solid "+r.verdictColor+"44",borderRadius:4,padding:"1px 8px",fontSize:10,fontWeight:700}}>{r.verdict}</span>
                           </td>
