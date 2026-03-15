@@ -28,6 +28,7 @@ if (typeof document !== "undefined" && !document.getElementById("atm-mobile-css"
 }
 
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
+const ANTHROPIC_KEY = "YOUR_ANTHROPIC_API_KEY_HERE";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
@@ -1563,7 +1564,12 @@ function ChartPatternAnalyzer() {
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-calls": "true"
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
