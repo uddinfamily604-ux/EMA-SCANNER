@@ -1624,7 +1624,7 @@ If no clear pattern is visible, say Pattern: No clear pattern and explain in Not
   const signalColor = signal?.toLowerCase().includes("bull") ? "#00e676" : signal?.toLowerCase().includes("bear") ? "#ff5252" : "#38bdf8";
 
   return (
-    <div style={{flex:1,overflowY:"auto",padding:"16px",background:"#080e1a",fontFamily:"monospace"}}>
+    <div style={{flex:1,overflowY:"auto",padding:"16px",background:"#080e1a",fontFamily:"monospace",height:"100%",boxSizing:"border-box"}}>
       <div style={{maxWidth:700,margin:"0 auto"}}>
 
         {/* Header */}
