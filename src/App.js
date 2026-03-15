@@ -1,6 +1,34 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
+// ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
+function useMobile() {
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => {
+    const fn = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", fn);
+    return () => window.removeEventListener("resize", fn);
+  }, []);
+  return isMobile;
+}
+// Inject global mobile CSS once
+if (typeof document !== "undefined" && !document.getElementById("atm-mobile-css")) {
+  const s = document.createElement("style");
+  s.id = "atm-mobile-css";
+  s.textContent = `
+    *{box-sizing:border-box;}
+    body{overflow-x:hidden;-webkit-text-size-adjust:100%;}
+    ::-webkit-scrollbar{width:4px;height:4px;}
+    ::-webkit-scrollbar-track{background:#080e1a;}
+    ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:2px;}
+    @media(max-width:768px){
+      input,button,select{font-size:16px!important;}
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
+const ANTHROPIC_KEY = process.env.REACT_APP_ANTHROPIC_KEY || "";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
@@ -55,12 +83,60 @@ async function sendPushover(userKey, apiToken, title, message) {
 let SIGNAL_LOG = [];
 try { SIGNAL_LOG = JSON.parse(localStorage.getItem("alo_signal_log")||"[]"); } catch(e){}
 function addSignalLog(entry) {
-  SIGNAL_LOG = [entry, ...SIGNAL_LOG].slice(0,100);
+  const enriched = {
+    ...entry,
+    id: Date.now(),
+    entryPrice: parseFloat(entry.price),
+    p15: null, p30: null, p60: null, pEOD: null,   // price snapshots
+    pnl15: null, pnl30: null, pnl60: null,           // % moves
+    checked15: false, checked30: false, checked60: false,
+  };
+  SIGNAL_LOG = [enriched, ...SIGNAL_LOG].slice(0, 200);
   try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
 }
 function clearSignalLog() {
   SIGNAL_LOG = [];
   try { localStorage.removeItem("alo_signal_log"); } catch(e){}
+}
+function saveSignalLog() {
+  try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
+}
+
+// ── Update signal performance with a fetched price ──
+async function checkSignalPerformance() {
+  const now = Date.now();
+  let updated = false;
+  for(let i = 0; i < SIGNAL_LOG.length; i++) {
+    const s = SIGNAL_LOG[i];
+    if(!s.id || !s.entryPrice) continue;
+    const age = (now - s.id) / 1000 / 60; // minutes since signal
+    const needsCheck = (!s.checked15 && age >= 15) || (!s.checked30 && age >= 30) || (!s.checked60 && age >= 60);
+    if(!needsCheck) continue;
+    try {
+      const res = await fetch(`https://api.polygon.io/v2/last/trade/${s.symbol}?apiKey=${API_KEY}`);
+      const data = await res.json();
+      const cur = data.results?.p;
+      if(!cur) continue;
+      const pct = ((cur - s.entryPrice) / s.entryPrice * 100);
+      const isLong = s.direction === "BUY";
+      const signedPct = isLong ? pct : -pct; // positive = signal was correct
+      if(!s.checked15 && age >= 15) {
+        SIGNAL_LOG[i] = {...s, checked15:true, p15:cur.toFixed(2), pnl15:signedPct.toFixed(2)};
+        s.checked15 = true; s.p15 = cur.toFixed(2); s.pnl15 = signedPct.toFixed(2);
+        updated = true;
+      }
+      if(!s.checked30 && age >= 30) {
+        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked30:true, p30:cur.toFixed(2), pnl30:signedPct.toFixed(2)};
+        updated = true;
+      }
+      if(!s.checked60 && age >= 60) {
+        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked60:true, p60:cur.toFixed(2), pnl60:signedPct.toFixed(2)};
+        updated = true;
+      }
+    } catch(e) {}
+  }
+  if(updated) saveSignalLog();
+  return updated;
 }
 
 // ─── P&L TRACKER ─────────────────────────────────────────────────────────────
@@ -490,6 +566,27 @@ function Section({title,children}){
     {children}
   </div>;
 }
+// Mobile-friendly collapsible settings panel
+function MobileSettingsPanel({width=250, children, style={}}){
+  const isMobile = useMobile();
+  const [open, setOpen] = useState(false);
+  if(!isMobile){
+    return <div style={{width,minWidth:width,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto",...style}}>{children}</div>;
+  }
+  return(
+    <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",...style}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:"#00b4d8",fontFamily:"'Courier New',monospace",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <span>⚙️ SETTINGS</span>
+        <span style={{fontSize:14}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&(
+        <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:12,borderTop:"1px solid #1e3a5a"}}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 function Stat({label,value,color="#c9d8e8"}){
   return <div style={{display:"flex",alignItems:"center",gap:5}}>
     <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1}}>{label}</span>
@@ -605,17 +702,58 @@ function AlertSettings({pushKey,setPushKey,pushToken,setPushToken,soundOn,setSou
 // ─── SIGNAL LOG PANEL ─────────────────────────────────────────────────────────
 function SignalLogPanel({logVersion}) {
   const [show, setShow] = useState(false);
-  const [,forceUpdate] = useState(0);
-  const handleClear = ()=>{ clearSignalLog(); forceUpdate(n=>n+1); };
+  const [tick, setTick] = useState(0);
+
+  // Auto-check performance every 60 seconds
+  useEffect(()=>{
+    const interval = setInterval(async()=>{
+      const updated = await checkSignalPerformance();
+      if(updated) setTick(n=>n+1);
+    }, 60000);
+    return ()=>clearInterval(interval);
+  },[]);
+
+  const handleClear = ()=>{ clearSignalLog(); setTick(n=>n+1); };
+
+  // Stats calculation
+  const completed = SIGNAL_LOG.filter(s=>s.pnl60!==null);
+  const wins = completed.filter(s=>parseFloat(s.pnl60)>0);
+  const losses = completed.filter(s=>parseFloat(s.pnl60)<=0);
+  const winRate = completed.length>0?((wins.length/completed.length)*100).toFixed(0):null;
+  const avgMove = completed.length>0?(completed.reduce((a,s)=>a+parseFloat(s.pnl60),0)/completed.length).toFixed(2):null;
+
+  const PnlBadge = ({val, label})=>{
+    if(val===null) return <span style={{fontSize:8,color:"#2a5a7a",padding:"1px 4px",border:"1px solid #1e3a5a",borderRadius:2}}>{label}…</span>;
+    const v = parseFloat(val);
+    const c = v>0?"#00e676":v<0?"#ff1744":"#ffeb3b";
+    return <span style={{fontSize:8,color:c,padding:"1px 4px",border:`1px solid ${c}`,borderRadius:2,fontWeight:700}}>{label} {v>0?"+":""}{v}%</span>;
+  };
+
   return (
     <div style={{borderTop:"1px solid #1e3a5a",padding:"8px 12px"}}>
       <button onClick={()=>setShow(s=>!s)} style={{width:"100%",padding:"6px",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#ffeb3b",fontSize:10,fontFamily:"inherit",fontWeight:700,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span>📋 SIGNAL LOG ({SIGNAL_LOG.length})</span>
-        <span>{show?"▲":"▼"}</span>
+        <span style={{display:"flex",gap:6,alignItems:"center"}}>
+          {winRate!==null&&<span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744"}}>WIN {winRate}%</span>}
+          {avgMove!==null&&<span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744"}}>AVG {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>}
+          <span>{show?"▲":"▼"}</span>
+        </span>
       </button>
       {show&&(
-        <div style={{maxHeight:220,overflowY:"auto",marginTop:6}}>
+        <div style={{maxHeight:320,overflowY:"auto",marginTop:6}}>
           <button onClick={handleClear} style={{width:"100%",padding:"4px",marginBottom:6,background:"#1a0a00",border:"1px solid #ff5722",borderRadius:3,color:"#ff5722",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>🗑 CLEAR LOG</button>
+
+          {/* Stats bar */}
+          {completed.length>0&&(
+            <div style={{display:"flex",gap:6,marginBottom:8,padding:"6px 8px",background:"#0a1520",borderRadius:4,border:"1px solid #1e3a5a",flexWrap:"wrap"}}>
+              <span style={{fontSize:9,color:"#3a6e9a"}}>📊 {completed.length} completed</span>
+              <span style={{fontSize:9,color:"#00e676"}}>✅ {wins.length} wins</span>
+              <span style={{fontSize:9,color:"#ff1744"}}>❌ {losses.length} losses</span>
+              <span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744",fontWeight:700}}>WIN RATE: {winRate}%</span>
+              <span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744",fontWeight:700}}>AVG 1HR: {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>
+            </div>
+          )}
+
           {SIGNAL_LOG.length===0&&<div style={{fontSize:10,color:"#2a5a7a",textAlign:"center",padding:10}}>No signals yet</div>}
           {SIGNAL_LOG.map((s,i)=>(
             <div key={i} style={{padding:"6px 8px",marginBottom:4,background:s.direction==="SELL"?"#1a050a":"#051a0a",border:`1px solid ${s.direction==="SELL"?"#ff1744":"#00e676"}`,borderRadius:4}}>
@@ -623,8 +761,15 @@ function SignalLogPanel({logVersion}) {
                 <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{s.symbol}</span>
                 <span style={{fontSize:9,color:s.direction==="SELL"?"#ff1744":"#00e676",fontWeight:700}}>★ {s.direction}</span>
               </div>
-              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · ${s.price}</div>
+              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · Entry: <span style={{color:"#e8f4ff",fontWeight:700}}>${s.price}</span></div>
               <div style={{fontSize:9,color:"#ffeb3b",marginTop:2}}>🕐 {s.timestamp}</div>
+              {/* Performance badges */}
+              <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
+                <PnlBadge val={s.pnl15} label="15m"/>
+                <PnlBadge val={s.pnl30} label="30m"/>
+                <PnlBadge val={s.pnl60} label="1hr"/>
+                {s.p15&&<span style={{fontSize:8,color:"#2a5a7a"}}>→ ${s.p15}</span>}
+              </div>
             </div>
           ))}
         </div>
@@ -748,6 +893,9 @@ function BondoFund() {
   const [liveQuote, setLiveQuote] = useState(null);
   const [closingPrices, setClosingPrices] = useState({});
   const [fetchingClose, setFetchingClose] = useState({});
+  const [posAction, setPosAction] = useState({}); // {id: "close"|"add"|"partial"}
+  const [addInputs, setAddInputs] = useState({});   // {id: {price, qty}}
+  const [partialInputs, setPartialInputs] = useState({}); // {id: {price, qty}}
   const symDebounceRef = useRef(null);
   const priceTimerRef = useRef({});
 
@@ -893,6 +1041,55 @@ function BondoFund() {
       const pnl = calcPnl(t.direction, t.type, t.entry, exitPrice, t.qty);
       return {...t, exit:exitPrice, pnl, open:false, closedAt:getETDateTime()};
     });
+    saveBondoFund(updated); setTrades(updated);
+  };
+
+  // ── Add to existing position (avg down/up) ──
+  const addToPosition = (id, addPrice, addQty) => {
+    const price = parseFloat(addPrice);
+    const qty = parseFloat(addQty);
+    if(!price || !qty || qty <= 0) return;
+    const updated = trades.map(t => {
+      if(t.id !== id) return t;
+      const newQty = parseFloat(t.qty) + qty;
+      // Weighted average entry price
+      const newAvgEntry = ((parseFloat(t.entry) * parseFloat(t.qty)) + (price * qty)) / newQty;
+      const note = (t.note||"") + ` +${qty}@$${price}`;
+      return {...t, qty: newQty, entry: newAvgEntry.toFixed(2), note: note.trim()};
+    });
+    saveBondoFund(updated); setTrades(updated);
+  };
+
+  // ── Partial close ──
+  const partialClose = (id, exitPrice, sellQty) => {
+    const price = parseFloat(exitPrice);
+    const qty = parseFloat(sellQty);
+    if(!price || !qty || qty <= 0) return;
+    const trade = trades.find(t => t.id === id);
+    if(!trade) return;
+    const remainQty = parseFloat(trade.qty) - qty;
+    if(remainQty < 0) { alert("Cannot sell more than you hold!"); return; }
+    // Record partial close as a closed trade
+    const partialPnl = calcPnl(trade.direction, trade.type, trade.entry, price, qty);
+    const closedPartial = {
+      ...trade,
+      id: Date.now(),
+      qty: qty,
+      exit: price,
+      pnl: partialPnl,
+      open: false,
+      closedAt: getETDateTime(),
+      note: `Partial close of ${trade.symbol} (${qty} of ${trade.qty})`,
+    };
+    let updated;
+    if(remainQty === 0) {
+      // Full close via partial
+      updated = trades.map(t => t.id === id ? {...t, exit:price, pnl:partialPnl, open:false, closedAt:getETDateTime()} : t);
+    } else {
+      // Keep remaining open, add closed partial as new entry
+      updated = trades.map(t => t.id === id ? {...t, qty: remainQty} : t);
+      updated = [...updated, closedPartial];
+    }
     saveBondoFund(updated); setTrades(updated);
   };
 
@@ -1063,43 +1260,117 @@ function BondoFund() {
                   <span style={{color:"#2a4a6a"}}> · Opened: {t.timestamp}</span>
                 </div>
 
-                {/* CLOSE POSITION */}
+                {/* POSITION ACTIONS — ADD / PARTIAL / CLOSE */}
                 <div style={{background:"#080e1a",borderRadius:6,padding:"10px",border:"1px solid #1e5a3a"}}>
-                  <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:8}}>CLOSE POSITION</div>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <input
-                      value={closingPrices[t.id]||""}
-                      onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
-                      placeholder="Exit price"
-                      style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,
-                        color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}
-                    />
-                    <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
-                      style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,
-                        color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                      {fetchingClose[t.id]?"⟳":"📡 LIVE"}
-                    </button>
-                    <button onClick={()=>closePosition(t.id)}
-                      disabled={!closingPrices[t.id]}
-                      style={{padding:"8px 14px",
-                        background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
-                        border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,
-                        borderRadius:4,color:closingPrices[t.id]?"#00e676":"#2a5a7a",
-                        fontSize:11,fontFamily:"inherit",cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
-                      ✓ CLOSE
-                    </button>
+                  {/* Tab selector */}
+                  <div style={{display:"flex",gap:4,marginBottom:8}}>
+                    {[["close","✓ CLOSE","#00e676"],["add","➕ ADD","#ffeb3b"],["partial","➖ PARTIAL","#ff9800"]].map(([key,label,color])=>(
+                      <button key={key} onClick={()=>setPosAction(p=>({...p,[t.id]:p[t.id]===key?null:key}))}
+                        style={{flex:1,padding:"5px 4px",fontSize:9,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:3,
+                          background:posAction[t.id]===key?color+"22":"#0d1b2e",
+                          border:`1px solid ${posAction[t.id]===key?color:"#1e3a5a"}`,
+                          color:posAction[t.id]===key?color:"#3a6e9a"}}>
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  {/* Preview P&L on close */}
-                  {closingPrices[t.id]&&(()=>{
-                    const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
-                    const col = preview>=0?"#00e676":"#ff1744";
-                    return (
-                      <div style={{marginTop:6,display:"flex",gap:12}}>
-                        <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
-                        <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
+
+                  {/* CLOSE */}
+                  {(posAction[t.id]==="close"||!posAction[t.id])&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:6}}>CLOSE ALL {t.qty} SHARES</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input value={closingPrices[t.id]||""} onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
+                          placeholder="Exit price" style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
+                        <button onClick={()=>closePosition(t.id)} disabled={!closingPrices[t.id]}
+                          style={{padding:"8px 14px",background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
+                            border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,borderRadius:4,
+                            color:closingPrices[t.id]?"#00e676":"#2a5a7a",fontSize:11,fontFamily:"inherit",
+                            cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
+                          ✓ CLOSE ALL
+                        </button>
                       </div>
-                    );
-                  })()}
+                      {closingPrices[t.id]&&(()=>{
+                        const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
+                        const col = preview>=0?"#00e676":"#ff1744";
+                        return <div style={{marginTop:6,display:"flex",gap:12}}>
+                          <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
+                          <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
+                        </div>;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* ADD TO POSITION */}
+                  {posAction[t.id]==="add"&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#ffeb3b",fontWeight:700,marginBottom:6}}>ADD TO POSITION · Avg Entry: ${t.entry}</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input placeholder="Add price" value={addInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
+                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
+                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
+                        <input placeholder="Qty" value={addInputs[t.id]?.qty||""}
+                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
+                          style={{width:60,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ addToPosition(t.id, addInputs[t.id]?.price ?? closingPrices[t.id], addInputs[t.id]?.qty); setAddInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
+                          disabled={!(addInputs[t.id]?.price||closingPrices[t.id])||!addInputs[t.id]?.qty}
+                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b3b00,#555500)",border:"1px solid #ffeb3b",borderRadius:4,
+                            color:"#ffeb3b",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          ➕ ADD
+                        </button>
+                      </div>
+                      {addInputs[t.id]?.price&&addInputs[t.id]?.qty&&(()=>{
+                        const newQty = parseFloat(t.qty)+parseFloat(addInputs[t.id].qty);
+                        const newAvg = ((parseFloat(t.entry)*parseFloat(t.qty))+(parseFloat(addInputs[t.id].price)*parseFloat(addInputs[t.id].qty)))/newQty;
+                        return <div style={{marginTop:6,fontSize:9,color:"#ffeb3b"}}>
+                          New avg: <strong>${newAvg.toFixed(2)}</strong> · Total qty: <strong>{newQty}</strong>
+                        </div>;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* PARTIAL CLOSE */}
+                  {posAction[t.id]==="partial"&&(
+                    <div>
+                      <div style={{fontSize:9,color:"#ff9800",fontWeight:700,marginBottom:6}}>PARTIAL SELL · Holding {t.qty} shares</div>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input placeholder="Exit price" value={partialInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
+                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
+                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
+                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                        </button>
+                        <input placeholder="Sell qty" value={partialInputs[t.id]?.qty||""}
+                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
+                          style={{width:60,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
+                        <button onClick={()=>{ partialClose(t.id, partialInputs[t.id]?.price, partialInputs[t.id]?.qty); setPartialInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
+                          disabled={!partialInputs[t.id]?.price||!partialInputs[t.id]?.qty}
+                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b1500,#5a2500)",border:"1px solid #ff9800",borderRadius:4,
+                            color:"#ff9800",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                          ➖ SELL
+                        </button>
+                      </div>
+                      {partialInputs[t.id]?.price&&partialInputs[t.id]?.qty&&(()=>{
+                        const sellQty = parseFloat(partialInputs[t.id].qty);
+                        const remain = parseFloat(t.qty) - sellQty;
+                        const pnl = calcPnl(t.direction,t.type,t.entry,partialInputs[t.id].price,sellQty);
+                        const col = pnl>=0?"#00e676":"#ff1744";
+                        return <div style={{marginTop:6,fontSize:9,color:"#ff9800"}}>
+                          Selling {sellQty} shares · Remaining: <strong>{remain>=0?remain:"⚠️ OVER"}</strong>
+                          {remain>=0&&<span style={{color:col,fontWeight:700}}> · P&L: {pnl>=0?"+":""}${pnl.toFixed(2)}</span>}
+                        </div>;
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -1244,6 +1515,253 @@ function BondoFund() {
   );
 }
 
+
+// ─── CHART PATTERN ANALYZER ───────────────────────────────────────────────────
+function ChartPatternAnalyzer() {
+  const [image, setImage] = React.useState(null);
+  const [imageData, setImageData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [dragging, setDragging] = React.useState(false);
+  const fileRef = React.useRef();
+
+  const processFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const url = URL.createObjectURL(file);
+    setImage(url);
+    setResult(null);
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(",")[1];
+      setImageData({ base64, type: file.type });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    processFile(e.dataTransfer.files[0]);
+  };
+
+  React.useEffect(() => {
+    const handler = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) { processFile(item.getAsFile()); break; }
+      }
+    };
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+  }, []);
+
+  const analyze = async () => {
+    if (!imageData) return;
+    setLoading(true); setResult(null); setError(null);
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-calls": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: `You are an expert technical analysis assistant embedded in the ATM Machine trading scanner — Alo's proprietary system combining SHA + HalfTrend signals.
+Analyze the uploaded stock chart image and respond ONLY in this exact structured format — no preamble, no markdown:
+
+Pattern: [chart pattern name, e.g. Bull Flag, Head & Shoulders, Double Bottom, Ascending Triangle, Wedge, etc.]
+Signal: [Bullish / Bearish / Neutral]
+Bias: [Bullish / Bearish / Neutral]
+Entry Zone: [price level or zone if visible, else "See chart"]
+Target: [price target if estimable, else "See chart"]
+Stop Loss: [stop level if estimable, else "See chart"]
+Confidence: [0-100 number only]
+Notes: [2-3 sentences of sharp, actionable insight. Mention key levels, volume if visible, and whether this aligns with a momentum or reversal setup.]
+
+If no clear pattern is visible, say Pattern: No clear pattern and explain in Notes.`,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: imageData.type, data: imageData.base64 } },
+              { type: "text", text: "Analyze this stock chart and identify the pattern." }
+            ]
+          }]
+        })
+      });
+      const data = await response.json();
+      if (data.error) { setError("API: " + data.error.message); return; }
+      const text = data.content?.map(b => b.text || "").join("").trim();
+      if (text) setResult(text);
+      else setError("No analysis returned. Try a cleaner chart image.");
+    } catch(e) {
+      setError("Error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const get = (key) => {
+    if (!result) return null;
+    const line = result.split("\n").find(l => l.toLowerCase().startsWith(key.toLowerCase()));
+    return line ? line.replace(/^[^:]+:\s*/i, "").trim() : null;
+  };
+
+  const pattern = get("Pattern");
+  const signal = get("Signal");
+  const bias = get("Bias");
+  const entry = get("Entry Zone");
+  const target = get("Target");
+  const stop = get("Stop Loss");
+  const confidence = get("Confidence");
+  const notes = get("Notes");
+  const confNum = confidence ? parseInt(confidence) : null;
+  const signalColor = signal?.toLowerCase().includes("bull") ? "#00e676" : signal?.toLowerCase().includes("bear") ? "#ff5252" : "#38bdf8";
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:"16px",background:"#080e1a",fontFamily:"monospace"}}>
+      <div style={{maxWidth:700,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>ATM MACHINE v6.0 · AI MODULE</div>
+          <div style={{fontSize:18,fontWeight:700,color:"#e8f4ff",letterSpacing:"-0.01em"}}>📊 Chart Pattern Analyzer</div>
+          <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>Upload, drag, or Ctrl+V paste a chart → AI identifies the pattern</div>
+        </div>
+
+        {/* Drop Zone */}
+        <div
+          onClick={() => fileRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          style={{
+            border:`2px dashed ${dragging?"#00e676":"#1e3a5a"}`,
+            borderRadius:8, padding:"28px 16px", textAlign:"center",
+            cursor:"pointer", background:dragging?"#00e67608":"#0d1e30",
+            transition:"all 0.2s", marginBottom:12
+          }}
+        >
+          <div style={{fontSize:28,marginBottom:8}}>📈</div>
+          <div style={{color:"#e8f4ff",fontSize:13,fontWeight:600,marginBottom:4}}>Drop chart here, click to browse, or Ctrl+V to paste</div>
+          <div style={{color:"#3a6e9a",fontSize:11}}>JPG · PNG · WEBP — TradingView screenshots work perfectly</div>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
+        </div>
+
+        {/* Preview */}
+        {image && (
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:6}}>CHART PREVIEW</div>
+            <div style={{border:"1px solid #1e3a5a",borderRadius:6,overflow:"hidden",position:"relative"}}>
+              <img src={image} alt="Chart" style={{width:"100%",display:"block",maxHeight:300,objectFit:"contain",background:"#000"}}/>
+              <button onClick={e=>{e.stopPropagation();setImage(null);setImageData(null);setResult(null);}}
+                style={{position:"absolute",top:6,right:6,background:"#00000099",border:"none",color:"#e8f4ff",borderRadius:4,padding:"3px 8px",cursor:"pointer",fontSize:11}}>
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Analyze Button */}
+        {imageData && !loading && (
+          <button onClick={analyze} style={{
+            width:"100%",padding:"12px 0",
+            background:"linear-gradient(135deg,#00e67622,#00e67611)",
+            border:"1px solid #00e67666",borderRadius:6,
+            color:"#00e676",fontSize:12,fontWeight:700,letterSpacing:"0.1em",
+            cursor:"pointer",fontFamily:"monospace",marginBottom:4
+          }}>⚡ ANALYZE PATTERN</button>
+        )}
+
+        {/* Loading */}
+        {loading && (
+          <div style={{textAlign:"center",padding:32}}>
+            <div style={{width:36,height:36,borderRadius:"50%",border:"3px solid #1e3a5a",borderTop:"3px solid #00e676",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>
+            <div style={{color:"#3a6e9a",fontSize:12,letterSpacing:"0.08em"}}>ANALYZING CHART...</div>
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div style={{background:"#ff525211",border:"1px solid #ff525244",borderRadius:6,padding:12,color:"#ff5252",fontSize:12,marginTop:8}}>{error}</div>
+        )}
+
+        {/* Result Card */}
+        {result && (
+          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:18,marginTop:12}}>
+
+            {/* Pattern + Signal */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.12em",marginBottom:3}}>PATTERN DETECTED</div>
+                <div style={{fontSize:17,fontWeight:700,color:"#e8f4ff"}}>{pattern||"—"}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {signal&&<span style={{background:signalColor+"22",color:signalColor,border:`1px solid ${signalColor}44`,borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{signal}</span>}
+                {bias&&<span style={{background:"#f59e0b22",color:"#f59e0b",border:"1px solid #f59e0b44",borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{bias}</span>}
+              </div>
+            </div>
+
+            {/* Metrics */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+              {[["ENTRY ZONE",entry,"#38bdf8"],["TARGET",target,"#00e676"],["STOP LOSS",stop,"#ff5252"]].map(([lbl,val,col])=>(
+                <div key={lbl} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 11px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:3}}>{lbl}</div>
+                  <div style={{color:val?col:"#3a6e9a",fontSize:12,fontWeight:600}}>{val||"N/A"}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Confidence Bar */}
+            {confNum&&(
+              <div style={{marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em"}}>CONFIDENCE</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"#f59e0b"}}>{confNum}%</span>
+                </div>
+                <div style={{height:5,background:"#1e3a5a",borderRadius:3}}>
+                  <div style={{height:"100%",width:`${confNum}%`,background:confNum>=70?"#00e676":confNum>=50?"#f59e0b":"#ff5252",borderRadius:3,transition:"width 1s ease"}}/>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {notes&&(
+              <div style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 12px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:5}}>🤖 BONDO NOTES</div>
+                <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.7}}>{notes}</div>
+              </div>
+            )}
+
+            {!pattern&&(
+              <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{result}</div>
+            )}
+          </div>
+        )}
+
+        {/* Tips */}
+        {!image&&(
+          <div style={{marginTop:16,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:14}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>💡 PRO TIPS</div>
+            {["Use TradingView's camera icon to download a clean chart screenshot","Crop out toolbars and side panels for best accuracy","Works with any timeframe — 5m, 15m, 1H, Daily","Ctrl+V to paste a screenshot directly from clipboard"].map((tip,i)=>(
+              <div key={i} style={{color:"#3a6e9a",fontSize:11,marginBottom:5,display:"flex",gap:6}}>
+                <span style={{color:"#00e676"}}>→</span>{tip}
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
 
 
 // ─── SPIKE SCANNER ────────────────────────────────────────────────────────────
@@ -1944,113 +2462,6 @@ function PreMarketHODLOD() {
   );
 }
 
-// ─── PATTERN AI ───────────────────────────────────────────────────────────────
-function ChartPatternAnalyzer() {
-  const [img, setImg] = useState(null);
-  const [b64, setB64] = useState(null);
-  const [mime, setMime] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState("");
-  const [err, setErr] = useState("");
-  const ref = useRef();
-
-  const load = file => {
-    if (!file || !file.type.startsWith("image/")) return;
-    setImg(URL.createObjectURL(file)); setResult(""); setErr(""); setMime(file.type);
-    const r = new FileReader();
-    r.onload = e => setB64(e.target.result.split(",")[1]);
-    r.readAsDataURL(file);
-  };
-
-  useEffect(() => {
-    const fn = e => {
-      const items = e.clipboardData && e.clipboardData.items;
-      if (items) for (const x of items) if (x.type.startsWith("image/")) { load(x.getAsFile()); break; }
-    };
-    window.addEventListener("paste", fn);
-    return () => window.removeEventListener("paste", fn);
-  }, []);
-
-  const analyze = async () => {
-    if (!b64) return;
-    setLoading(true); setResult(""); setErr("");
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 800,
-          system: "You are a professional technical analyst. Analyze the stock chart and reply in exactly this format:\nPattern: [name]\nSignal: [Bullish/Bearish/Neutral]\nEntry: [level or See chart]\nTarget: [level or See chart]\nStop: [level or See chart]\nConfidence: [0-100]\nNotes: [2-3 sentences]",
-          messages: [{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:mime,data:b64}},
-            {type:"text",text:"Analyze this chart."}
-          ]}]
-        })
-      });
-      const d = await res.json();
-      if (d.error) { setErr("API Error: " + d.error.message); }
-      else {
-        const t = (d.content || []).map(x => x.text || "").join("").trim();
-        if (t) setResult(t); else setErr("No response.");
-      }
-    } catch(e) { setErr("Error: " + e.message); }
-    setLoading(false);
-  };
-
-  const g = k => {
-    if (!result) return "—";
-    const l = result.split("\n").find(x => x.toLowerCase().startsWith(k.toLowerCase()));
-    return l ? l.replace(/^[^:]+:\s*/, "") : "—";
-  };
-
-  return (
-    <div style={{flex:1,overflowY:"auto",padding:16,background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace"}}>
-      <div style={{maxWidth:680,margin:"0 auto"}}>
-        <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>ATM MACHINE v6.0</div>
-        <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>Pattern AI</div>
-        <div style={{fontSize:11,color:"#3a6e9a",marginBottom:14}}>Upload or Ctrl+V paste a TradingView screenshot</div>
-        <div onClick={() => ref.current.click()} style={{border:"2px dashed #1e3a5a",borderRadius:8,padding:"22px 16px",textAlign:"center",cursor:"pointer",background:"#0d1e30",marginBottom:10}}>
-          <div style={{fontSize:22}}>&#128200;</div>
-          <div style={{fontSize:13,fontWeight:600,margin:"6px 0 2px"}}>Click to upload or Ctrl+V paste</div>
-          <div style={{fontSize:11,color:"#3a6e9a"}}>JPG · PNG · WEBP</div>
-          <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={e => load(e.target.files[0])}/>
-        </div>
-        {img && (
-          <div style={{marginBottom:10,border:"1px solid #1e3a5a",borderRadius:6,overflow:"hidden"}}>
-            <img src={img} alt="chart" style={{width:"100%",maxHeight:260,objectFit:"contain",background:"#000",display:"block"}}/>
-          </div>
-        )}
-        {b64 && !loading && (
-          <button onClick={analyze} style={{width:"100%",padding:"11px 0",background:"#00e67611",border:"1px solid #00e67655",borderRadius:6,color:"#00e676",fontSize:12,fontWeight:700,letterSpacing:"0.1em",cursor:"pointer",fontFamily:"monospace",marginBottom:8}}>ANALYZE PATTERN</button>
-        )}
-        {loading && <div style={{textAlign:"center",padding:24,color:"#3a6e9a",fontSize:12}}>Analyzing...</div>}
-        {err && <div style={{background:"#ff525211",border:"1px solid #ff525244",borderRadius:6,padding:12,color:"#ff5252",fontSize:12,marginBottom:8}}>{err}</div>}
-        {result && (
-          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:16}}>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>PATTERN</div>
-              <div style={{fontSize:16,fontWeight:700}}>{g("Pattern")}</div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-              {[["ENTRY", g("Entry"), "#38bdf8"], ["TARGET", g("Target"), "#00e676"], ["STOP", g("Stop"), "#ff5252"]].map(([l,v,c]) => (
-                <div key={l} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"8px 10px"}}>
-                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2}}>{l}</div>
-                  <div style={{color:c,fontSize:12,fontWeight:600}}>{v}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 12px"}}>
-              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:4}}>SIGNAL: {g("Signal")} · CONFIDENCE: {g("Confidence")}%</div>
-              <div style={{fontSize:12,lineHeight:1.7}}>{g("Notes")}</div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 
 // ─── FINANCIAL ASTROLOGY ──────────────────────────────────────────────────────
 function FinancialAstrology() {
@@ -2062,139 +2473,6 @@ function FinancialAstrology() {
   const [scanning, setScanning] = useState(false);
   const [activeView, setActiveView] = useState("single");
   const [scanFilter, setScanFilter] = useState("ALL");
-
-
-  // ── CEO Birth Date Database ────────────────────────────────────────────────
-  const CEO_DB = {
-    AAPL: {name:"Tim Cook",        dob:[1960,11,1]},
-    MSFT: {name:"Satya Nadella",   dob:[1967,8,19]},
-    NVDA: {name:"Jensen Huang",    dob:[1963,2,17]},
-    AMZN: {name:"Andy Jassy",      dob:[1968,1,13]},
-    GOOGL:{name:"Sundar Pichai",   dob:[1972,6,10]},
-    META: {name:"Mark Zuckerberg", dob:[1984,5,14]},
-    TSLA: {name:"Elon Musk",       dob:[1971,6,28]},
-    NFLX: {name:"Greg Peters",     dob:[1969,4,1]},
-    BRKB: {name:"Warren Buffett",  dob:[1930,8,30]},
-    JPM:  {name:"Jamie Dimon",     dob:[1956,3,13]},
-    AMD:  {name:"Lisa Su",         dob:[1969,11,7]},
-    INTC: {name:"Pat Gelsinger",   dob:[1961,12,23]},
-    CRM:  {name:"Marc Benioff",    dob:[1964,9,25]},
-    ORCL: {name:"Safra Catz",      dob:[1961,12,1]},
-    CSCO: {name:"Chuck Robbins",   dob:[1966,1,1]},
-    ADBE: {name:"Shantanu Narayen",dob:[1963,5,27]},
-    PYPL: {name:"Alex Chriss",     dob:[1977,1,1]},
-    UBER: {name:"Dara Khosrowshahi",dob:[1969,5,28]},
-    GS:   {name:"David Solomon",   dob:[1962,4,22]},
-    BAC:  {name:"Brian Moynihan",  dob:[1959,10,9]},
-    WFC:  {name:"Charlie Scharf",  dob:[1965,1,1]},
-    MS:   {name:"Ted Pick",        dob:[1969,1,1]},
-    V:    {name:"Ryan McInerney",  dob:[1976,1,1]},
-    MA:   {name:"Michael Miebach", dob:[1970,1,1]},
-    NKE:  {name:"Elliott Hill",    dob:[1969,1,1]},
-    SBUX: {name:"Brian Niccol",    dob:[1974,6,5]},
-    MCD:  {name:"Chris Kempczinski",dob:[1968,11,6]},
-    KO:   {name:"James Quincey",   dob:[1965,1,1]},
-    PEP:  {name:"Ramon Laguarta",  dob:[1964,1,1]},
-    WMT:  {name:"Doug McMillon",   dob:[1966,10,17]},
-    JNJ:  {name:"Joaquin Duato",   dob:[1965,1,1]},
-    PFE:  {name:"Albert Bourla",   dob:[1961,10,21]},
-    MRNA: {name:"Stephane Bancel",  dob:[1972,4,26]},
-    XOM:  {name:"Darren Woods",    dob:[1964,8,1]},
-    CVX:  {name:"Mike Wirth",      dob:[1960,1,1]},
-    SPY:  {name:"State Street",    dob:[1960,1,1]},
-    QQQ:  {name:"Invesco",         dob:[1960,1,1]},
-    COIN: {name:"Brian Armstrong", dob:[1983,1,25]},
-    PLTR: {name:"Alex Karp",       dob:[1967,10,2]},
-    MARA: {name:"Fred Thiel",      dob:[1964,1,1]},
-    MSTR: {name:"Phong Le",        dob:[1976,1,1]},
-    SOFI: {name:"Anthony Noto",    dob:[1969,3,7]},
-    RIVN: {name:"RJ Scaringe",     dob:[1983,9,30]},
-    BABA: {name:"Eddie Wu",        dob:[1974,1,1]},
-    AMGN: {name:"Robert Bradway",  dob:[1963,1,1]},
-    UNH:  {name:"Andrew Witty",    dob:[1964,8,22]},
-    TGT:  {name:"Brian Cornell",   dob:[1961,11,1]},
-    GLD:  {name:"State Street",    dob:[1960,1,1]},
-    IWM:  {name:"iShares",         dob:[1960,1,1]},
-    SQ:   {name:"Jack Dorsey",     dob:[1976,11,19]},
-    // Next 50 CEOs
-    COST: {name:"Ron Vachris",       dob:[1965,1,1]},
-    HD:   {name:"Ted Decker",        dob:[1964,1,1]},
-    LOW:  {name:"Marvin Ellison",    dob:[1965,3,1]},
-    TJX:  {name:"Ernie Herrman",     dob:[1963,1,1]},
-    EBAY: {name:"Jamie Iannone",     dob:[1973,1,1]},
-    DIS:  {name:"Bob Iger",          dob:[1951,2,10]},
-    CMCSA:{name:"Brian Roberts",     dob:[1959,6,28]},
-    BA:   {name:"Kelly Ortberg",     dob:[1963,1,1]},
-    GE:   {name:"Larry Culp",        dob:[1963,3,9]},
-    MMM:  {name:"Bill Brown",        dob:[1963,1,1]},
-    CAT:  {name:"Jim Umpleby",       dob:[1959,1,1]},
-    HON:  {name:"Vimal Kapur",       dob:[1968,1,1]},
-    LMT:  {name:"Jim Taiclet",       dob:[1961,1,1]},
-    RTX:  {name:"Greg Hayes",        dob:[1962,3,1]},
-    NOC:  {name:"Kathy Warden",      dob:[1970,1,1]},
-    DE:   {name:"John May",          dob:[1964,1,1]},
-    ABBV: {name:"Rob Michael",       dob:[1968,1,1]},
-    LLY:  {name:"David Ricks",       dob:[1970,5,23]},
-    TMO:  {name:"Marc Casper",       dob:[1968,1,1]},
-    DHR:  {name:"Rainer Blair",      dob:[1967,1,1]},
-    MDT:  {name:"Geoff Martha",      dob:[1969,1,1]},
-    ISRG: {name:"Gary Guthart",      dob:[1966,1,1]},
-    REGN: {name:"Leonard Schleifer", dob:[1953,6,28]},
-    VRTX: {name:"Reshma Kewalramani",dob:[1975,1,1]},
-    BLK:  {name:"Larry Fink",        dob:[1952,11,2]},
-    SCHW: {name:"Rick Wurster",      dob:[1966,1,1]},
-    AXP:  {name:"Steve Squeri",      dob:[1959,12,10]},
-    C:    {name:"Jane Fraser",       dob:[1967,4,3]},
-    IBM:  {name:"Arvind Krishna",    dob:[1963,1,1]},
-    TXN:  {name:"Haviv Ilan",        dob:[1970,1,1]},
-    QCOM: {name:"Cristiano Amon",    dob:[1970,8,20]},
-    AVGO: {name:"Hock Tan",          dob:[1952,11,1]},
-    MU:   {name:"Sanjay Mehrotra",   dob:[1958,5,14]},
-    NOW:  {name:"Bill McDermott",    dob:[1961,8,18]},
-    PANW: {name:"Nikesh Arora",      dob:[1968,2,9]},
-    CRWD: {name:"George Kurtz",      dob:[1970,9,16]},
-    DDOG: {name:"Olivier Pomel",     dob:[1978,1,1]},
-    SLB:  {name:"Olivier Le Peuch",  dob:[1965,1,1]},
-    FCX:  {name:"Richard Adkerson",  dob:[1946,12,31]},
-    PGR:  {name:"Tricia Griffith",   dob:[1964,4,2]},
-    NFLX: {name:"Greg Peters",       dob:[1969,4,1]},
-    // Batch 3 CEOs
-    T:    {name:"John Stankey",      dob:[1963,6,17]},
-    VZ:   {name:"Hans Vestberg",     dob:[1965,9,13]},
-    TMUS: {name:"Mike Sievert",      dob:[1969,1,1]},
-    CHTR: {name:"Chris Winfrey",     dob:[1972,1,1]},
-    SPOT: {name:"Daniel Ek",         dob:[1983,2,21]},
-    SNAP: {name:"Evan Spiegel",      dob:[1990,6,4]},
-    PINS: {name:"Bill Ready",        dob:[1976,1,1]},
-    SPGI: {name:"Doug Peterson",     dob:[1961,1,1]},
-    ICE:  {name:"Jeff Sprecher",     dob:[1965,1,1]},
-    CME:  {name:"Terry Duffy",       dob:[1958,5,24]},
-    MCO:  {name:"Rob Fauber",        dob:[1969,1,1]},
-    CVS:  {name:"David Joyner",      dob:[1966,1,1]},
-    CI:   {name:"David Cordani",     dob:[1966,3,1]},
-    HUM:  {name:"Jim Rechtin",       dob:[1970,1,1]},
-    AMT:  {name:"Steve Vondran",     dob:[1970,1,1]},
-    PLD:  {name:"Hamid Moghadam",    dob:[1956,8,10]},
-    EQIX: {name:"Charles Meyers",    dob:[1966,1,1]},
-    PG:   {name:"Jon Moeller",       dob:[1964,1,1]},
-    CL:   {name:"Noel Wallace",      dob:[1964,1,1]},
-    PM:   {name:"Jacek Olczak",      dob:[1966,1,1]},
-    F:    {name:"Jim Farley",        dob:[1962,7,7]},
-    GM:   {name:"Mary Barra",        dob:[1961,12,24]},
-    DAL:  {name:"Ed Bastian",        dob:[1957,4,8]},
-    UAL:  {name:"Scott Kirby",       dob:[1967,8,19]},
-    MAR:  {name:"Tony Capuano",      dob:[1965,1,1]},
-    HLT:  {name:"Christopher Nassetta",dob:[1962,11,1]},
-    ADSK: {name:"Diane Adams",       dob:[1967,1,1]},
-    FTNT: {name:"Ken Xie",           dob:[1965,1,1]},
-    OKTA: {name:"Todd McKinnon",     dob:[1972,1,1]},
-    KLAC: {name:"Rick Wallace",      dob:[1963,1,1]},
-    MRVL: {name:"Matt Murphy",       dob:[1968,1,1]},
-    PANW: {name:"Nikesh Arora",      dob:[1968,2,9]},
-    MO:   {name:"Billy Gifford",     dob:[1966,1,1]},
-    ABNB: {name:"Brian Chesky",    dob:[1981,8,29]},
-    SNOW: {name:"Sridhar Ramaswamy",dob:[1971,1,1]},
-  };
 
   // ── IPO Database (Top 50 S&P 500 + key ETFs) ──────────────────────────────
   const IPO_DB = {
@@ -2221,124 +2499,6 @@ function FinancialAstrology() {
     UBER: {date:[2019,5,10],  name:"Uber"},
     ABNB: {date:[2020,12,10], name:"Airbnb"},
     SNOW: {date:[2020,9,16],  name:"Snowflake"},
-    // ── Next 50 ──────────────────────────────────────────────────────────────
-    // Retail & Consumer
-    COST: {date:[1985,12,5],  name:"Costco"},
-    HD:   {date:[1981,9,22],  name:"Home Depot"},
-    LOW:  {date:[1961,10,10], name:"Lowe's"},
-    TJX:  {date:[1987,1,23],  name:"TJX Companies"},
-    EBAY: {date:[1998,9,24],  name:"eBay"},
-    // Entertainment & Media
-    DIS:  {date:[1957,11,12], name:"Disney"},
-    CMCSA:{date:[1972,6,29],  name:"Comcast"},
-    NWSA: {date:[2013,6,19],  name:"News Corp"},
-    PARA: {date:[1952,9,26],  name:"Paramount"},
-    // Industrials
-    BA:   {date:[1934,9,5],   name:"Boeing"},
-    GE:   {date:[1892,1,2],   name:"GE Aerospace"},
-    MMM:  {date:[1916,8,8],   name:"3M"},
-    CAT:  {date:[1929,12,2],  name:"Caterpillar"},
-    HON:  {date:[1914,4,15],  name:"Honeywell"},
-    LMT:  {date:[1995,3,15],  name:"Lockheed Martin"},
-    RTX:  {date:[1934,9,5],   name:"RTX Corp"},
-    NOC:  {date:[1994,4,18],  name:"Northrop Grumman"},
-    DE:   {date:[1978,6,15],  name:"Deere & Co"},
-    EMR:  {date:[1956,11,1],  name:"Emerson Electric"},
-    // Healthcare & Pharma
-    ABBV: {date:[2013,1,2],   name:"AbbVie"},
-    LLY:  {date:[1952,7,22],  name:"Eli Lilly"},
-    TMO:  {date:[1980,7,15],  name:"Thermo Fisher"},
-    DHR:  {date:[1985,1,15],  name:"Danaher"},
-    MDT:  {date:[1960,10,11], name:"Medtronic"},
-    BSX:  {date:[1992,5,18],  name:"Boston Scientific"},
-    ISRG: {date:[2000,6,7],   name:"Intuitive Surgical"},
-    REGN: {date:[1991,4,4],   name:"Regeneron"},
-    VRTX: {date:[1991,7,26],  name:"Vertex Pharma"},
-    // Financials
-    BLK:  {date:[1999,10,1],  name:"BlackRock"},
-    SCHW: {date:[1987,9,22],  name:"Charles Schwab"},
-    AXP:  {date:[1977,5,2],   name:"American Express"},
-    C:    {date:[1986,6,3],   name:"Citigroup"},
-    USB:  {date:[1929,1,2],   name:"US Bancorp"},
-    PGR:  {date:[1965,4,15],  name:"Progressive"},
-    MET:  {date:[2000,4,5],   name:"MetLife"},
-    // Tech
-    IBM:  {date:[1915,11,11], name:"IBM"},
-    TXN:  {date:[1953,10,1],  name:"Texas Instruments"},
-    QCOM: {date:[1991,12,13], name:"Qualcomm"},
-    AVGO: {date:[2009,8,6],   name:"Broadcom"},
-    MU:   {date:[1984,10,5],  name:"Micron"},
-    AMAT: {date:[1972,10,5],  name:"Applied Materials"},
-    LRCX: {date:[1984,5,7],   name:"Lam Research"},
-    NOW:  {date:[2012,6,29],  name:"ServiceNow"},
-    PANW: {date:[2012,7,20],  name:"Palo Alto Networks"},
-    CRWD: {date:[2019,6,12],  name:"CrowdStrike"},
-    DDOG: {date:[2019,9,19],  name:"Datadog"},
-    ZS:   {date:[2018,3,16],  name:"Zscaler"},
-    // Energy & Materials
-    SLB:  {date:[1962,11,15], name:"SLB (Schlumberger)"},
-    FCX:  {date:[1995,7,18],  name:"Freeport-McMoRan"},
-    NEM:  {date:[1936,6,15],  name:"Newmont"},
-    // ── Next 50 (batch 3) ────────────────────────────────────────────────────
-    // Communication & Streaming
-    T:    {date:[1984,1,2],   name:"AT&T"},
-    VZ:   {date:[1983,11,21], name:"Verizon"},
-    TMUS: {date:[2007,7,2],   name:"T-Mobile"},
-    CHTR: {date:[2010,11,10], name:"Charter Comm"},
-    SPOT: {date:[2018,4,3],   name:"Spotify"},
-    SNAP: {date:[2017,3,2],   name:"Snap"},
-    PINS: {date:[2019,4,18],  name:"Pinterest"},
-    RBLX: {date:[2021,3,10],  name:"Roblox"},
-    // Financial Services
-    SPGI: {date:[1966,5,2],   name:"S&P Global"},
-    ICE:  {date:[2005,11,16], name:"Intercontinental Exch"},
-    CME:  {date:[2002,12,6],  name:"CME Group"},
-    MCO:  {date:[2000,10,3],  name:"Moody's"},
-    MSCI: {date:[2007,11,15], name:"MSCI"},
-    FI:   {date:[1971,5,1],   name:"Fiserv"},
-    FIS:  {date:[2001,2,1],   name:"Fidelity Natl Info"},
-    // Healthcare Services
-    CVS:  {date:[1972,1,3],   name:"CVS Health"},
-    CI:   {date:[1974,3,7],   name:"Cigna"},
-    HUM:  {date:[1961,6,15],  name:"Humana"},
-    ELV:  {date:[2004,11,1],  name:"Elevance Health"},
-    DGX:  {date:[1996,12,19], name:"Quest Diagnostics"},
-    // Real Estate
-    AMT:  {date:[1998,6,4],   name:"American Tower"},
-    PLD:  {date:[1997,11,20], name:"Prologis"},
-    EQIX: {date:[2000,8,16],  name:"Equinix"},
-    CCI:  {date:[1998,8,18],  name:"Crown Castle"},
-    SPG:  {date:[1993,3,19],  name:"Simon Property"},
-    // Consumer Staples
-    PG:   {date:[1890,1,2],   name:"Procter & Gamble"},
-    CL:   {date:[1923,9,25],  name:"Colgate-Palmolive"},
-    KMB:  {date:[1928,10,1],  name:"Kimberly-Clark"},
-    GIS:  {date:[1928,7,2],   name:"General Mills"},
-    K:    {date:[1925,3,2],   name:"Kellanova"},
-    MO:   {date:[1928,1,2],   name:"Altria"},
-    PM:   {date:[2008,3,31],  name:"Philip Morris"},
-    // Autos
-    F:    {date:[1956,2,24],  name:"Ford"},
-    GM:   {date:[2010,11,18], name:"General Motors"},
-    // Airlines & Travel
-    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
-    UAL:  {date:[2006,2,1],   name:"United Airlines"},
-    AAL:  {date:[2013,12,9],  name:"American Airlines"},
-    MAR:  {date:[1998,10,8],  name:"Marriott"},
-    HLT:  {date:[2013,12,12], name:"Hilton"},
-    // Semiconductors
-    KLAC: {date:[1980,6,16],  name:"KLA Corp"},
-    MRVL: {date:[2000,6,27],  name:"Marvell Tech"},
-    NXPI: {date:[2010,8,6],   name:"NXP Semiconductors"},
-    ON:   {date:[2000,5,10],  name:"ON Semiconductor"},
-    WOLF: {date:[1993,2,5],   name:"Wolfspeed"},
-    // Software
-    ADSK: {date:[1985,6,21],  name:"Autodesk"},
-    ANSS: {date:[1996,6,10],  name:"Ansys"},
-    CDNS: {date:[1988,5,2],   name:"Cadence Design"},
-    SNPS: {date:[1992,2,26],  name:"Synopsys"},
-    FTNT: {date:[2009,11,18], name:"Fortinet"},
-    OKTA: {date:[2017,4,7],   name:"Okta"},
     PLTR: {date:[2020,9,30],  name:"Palantir"},
     COIN: {date:[2021,4,14],  name:"Coinbase"},
     // Finance
@@ -2377,6 +2537,178 @@ function FinancialAstrology() {
     SOFI: {date:[2021,6,1],   name:"SoFi"},
     RIVN: {date:[2021,11,10], name:"Rivian"},
     BABA: {date:[2014,9,19],  name:"Alibaba"},
+    // ── Batch 2: Major S&P 500 ──────────────────────────────────────────────
+    COST: {date:[1985,12,5],  name:"Costco"},
+    HD:   {date:[1981,9,22],  name:"Home Depot"},
+    LOW:  {date:[1961,10,10], name:"Lowe's"},
+    TJX:  {date:[1987,1,23],  name:"TJX Companies"},
+    DIS:  {date:[1957,11,12], name:"Disney"},
+    BA:   {date:[1934,9,5],   name:"Boeing"},
+    GE:   {date:[1892,1,2],   name:"GE Aerospace"},
+    MMM:  {date:[1916,8,8],   name:"3M"},
+    CAT:  {date:[1929,12,2],  name:"Caterpillar"},
+    HON:  {date:[1914,4,15],  name:"Honeywell"},
+    LMT:  {date:[1995,3,15],  name:"Lockheed Martin"},
+    RTX:  {date:[1934,9,5],   name:"RTX Corp"},
+    DE:   {date:[1978,6,15],  name:"Deere & Co"},
+    ABBV: {date:[2013,1,2],   name:"AbbVie"},
+    LLY:  {date:[1952,7,22],  name:"Eli Lilly"},
+    TMO:  {date:[1980,7,15],  name:"Thermo Fisher"},
+    MDT:  {date:[1960,10,11], name:"Medtronic"},
+    ISRG: {date:[2000,6,7],   name:"Intuitive Surgical"},
+    REGN: {date:[1991,4,4],   name:"Regeneron"},
+    BLK:  {date:[1999,10,1],  name:"BlackRock"},
+    AXP:  {date:[1977,5,2],   name:"American Express"},
+    C:    {date:[1986,6,3],   name:"Citigroup"},
+    IBM:  {date:[1915,11,11], name:"IBM"},
+    QCOM: {date:[1991,12,13], name:"Qualcomm"},
+    AVGO: {date:[2009,8,6],   name:"Broadcom"},
+    MU:   {date:[1984,10,5],  name:"Micron"},
+    NOW:  {date:[2012,6,29],  name:"ServiceNow"},
+    PANW: {date:[2012,7,20],  name:"Palo Alto Networks"},
+    CRWD: {date:[2019,6,12],  name:"CrowdStrike"},
+    // ── Batch 3: Telecom, Consumer, Auto, Travel ────────────────────────────
+    T:    {date:[1984,1,2],   name:"AT&T"},
+    VZ:   {date:[1983,11,21], name:"Verizon"},
+    TMUS: {date:[2007,7,2],   name:"T-Mobile"},
+    SPOT: {date:[2018,4,3],   name:"Spotify"},
+    SNAP: {date:[2017,3,2],   name:"Snap"},
+    SPGI: {date:[1966,5,2],   name:"S&P Global"},
+    CME:  {date:[2002,12,6],  name:"CME Group"},
+    CVS:  {date:[1972,1,3],   name:"CVS Health"},
+    CI:   {date:[1974,3,7],   name:"Cigna"},
+    AMT:  {date:[1998,6,4],   name:"American Tower"},
+    PLD:  {date:[1997,11,20], name:"Prologis"},
+    PG:   {date:[1890,1,2],   name:"Procter & Gamble"},
+    PM:   {date:[2008,3,31],  name:"Philip Morris"},
+    MO:   {date:[1928,1,2],   name:"Altria"},
+    F:    {date:[1956,2,24],  name:"Ford"},
+    GM:   {date:[2010,11,18], name:"General Motors"},
+    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
+    MAR:  {date:[1998,10,8],  name:"Marriott"},
+    HLT:  {date:[2013,12,12], name:"Hilton"},
+    FTNT: {date:[2009,11,18], name:"Fortinet"},
+    // ── Batch 4: Growth & Global ─────────────────────────────────────────────
+    ACN:  {date:[2001,7,19],  name:"Accenture"},
+    INTU: {date:[1993,3,12],  name:"Intuit"},
+    ANET: {date:[2014,6,6],   name:"Arista Networks"},
+    TTD:  {date:[2016,9,21],  name:"Trade Desk"},
+    DASH: {date:[2020,12,9],  name:"DoorDash"},
+    APP:  {date:[2018,9,18],  name:"AppLovin"},
+    AFRM: {date:[2021,1,13],  name:"Affirm"},
+    SMCI: {date:[2007,3,29],  name:"Super Micro"},
+    ARM:  {date:[2023,9,14],  name:"ARM Holdings"},
+    ASML: {date:[1995,3,6],   name:"ASML"},
+    TSM:  {date:[1994,10,13], name:"TSMC"},
+    SHOP: {date:[2015,5,21],  name:"Shopify"},
+    MELI: {date:[2007,8,10],  name:"MercadoLibre"},
+    NET:  {date:[2019,9,13],  name:"Cloudflare"},
+    HUBS: {date:[2014,10,9],  name:"HubSpot"},
+    ZM:   {date:[2019,4,18],  name:"Zoom"},
+    DKNG: {date:[2020,4,24],  name:"DraftKings"},
+    AXON: {date:[2001,5,9],   name:"Axon Enterprise"},
+    BKNG: {date:[1999,3,30],  name:"Booking Holdings"},
+    LULU: {date:[2007,7,27],  name:"Lululemon"},
+    RL:   {date:[1997,6,12],  name:"Ralph Lauren"},
+    RCL:  {date:[1993,4,10],  name:"Royal Caribbean"},
+    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
+    EXPE: {date:[1999,11,8],  name:"Expedia"},
+    WBD:  {date:[2022,4,11],  name:"Warner Bros Discovery"},
+    LRCX: {date:[1984,5,7],   name:"Lam Research"},
+    KLAC: {date:[1980,6,16],  name:"KLA Corp"},
+    MRVL: {date:[2000,6,27],  name:"Marvell Tech"},
+  };
+
+  // ── CEO Database ───────────────────────────────────────────────────────────
+  const CEO_DB = {
+    AAPL: {name:"Tim Cook",          dob:[1960,11,1]},
+    MSFT: {name:"Satya Nadella",     dob:[1967,8,19]},
+    NVDA: {name:"Jensen Huang",      dob:[1963,2,17]},
+    AMZN: {name:"Andy Jassy",        dob:[1968,1,13]},
+    GOOGL:{name:"Sundar Pichai",     dob:[1972,6,10]},
+    META: {name:"Mark Zuckerberg",   dob:[1984,5,14]},
+    TSLA: {name:"Elon Musk",         dob:[1971,6,28]},
+    BRKB: {name:"Warren Buffett",    dob:[1930,8,30]},
+    JPM:  {name:"Jamie Dimon",       dob:[1956,3,13]},
+    AMD:  {name:"Lisa Su",           dob:[1969,11,7]},
+    CRM:  {name:"Marc Benioff",      dob:[1964,9,25]},
+    UBER: {name:"Dara Khosrowshahi", dob:[1969,5,28]},
+    GS:   {name:"David Solomon",     dob:[1962,4,22]},
+    BAC:  {name:"Brian Moynihan",    dob:[1959,10,9]},
+    V:    {name:"Ryan McInerney",    dob:[1976,1,1]},
+    NKE:  {name:"Elliott Hill",      dob:[1969,1,1]},
+    SBUX: {name:"Brian Niccol",      dob:[1974,6,5]},
+    MCD:  {name:"Chris Kempczinski", dob:[1968,11,6]},
+    WMT:  {name:"Doug McMillon",     dob:[1966,10,17]},
+    PFE:  {name:"Albert Bourla",     dob:[1961,10,21]},
+    MRNA: {name:"Stephane Bancel",   dob:[1972,4,26]},
+    XOM:  {name:"Darren Woods",      dob:[1964,8,1]},
+    COIN: {name:"Brian Armstrong",   dob:[1983,1,25]},
+    PLTR: {name:"Alex Karp",         dob:[1967,10,2]},
+    SQ:   {name:"Jack Dorsey",       dob:[1976,11,19]},
+    ABNB: {name:"Brian Chesky",      dob:[1981,8,29]},
+    SOFI: {name:"Anthony Noto",      dob:[1969,3,7]},
+    RIVN: {name:"RJ Scaringe",       dob:[1983,9,30]},
+    COST: {name:"Ron Vachris",       dob:[1965,1,1]},
+    HD:   {name:"Ted Decker",        dob:[1964,1,1]},
+    LOW:  {name:"Marvin Ellison",    dob:[1965,3,1]},
+    DIS:  {name:"Bob Iger",          dob:[1951,2,10]},
+    BA:   {name:"Kelly Ortberg",     dob:[1963,1,1]},
+    GE:   {name:"Larry Culp",        dob:[1963,3,9]},
+    CAT:  {name:"Jim Umpleby",       dob:[1959,1,1]},
+    LMT:  {name:"Jim Taiclet",       dob:[1961,1,1]},
+    LLY:  {name:"David Ricks",       dob:[1970,5,23]},
+    TMO:  {name:"Marc Casper",       dob:[1968,1,1]},
+    ISRG: {name:"Gary Guthart",      dob:[1966,1,1]},
+    REGN: {name:"Leonard Schleifer", dob:[1953,6,28]},
+    BLK:  {name:"Larry Fink",        dob:[1952,11,2]},
+    AXP:  {name:"Steve Squeri",      dob:[1959,12,10]},
+    C:    {name:"Jane Fraser",       dob:[1967,4,3]},
+    IBM:  {name:"Arvind Krishna",    dob:[1963,1,1]},
+    QCOM: {name:"Cristiano Amon",    dob:[1970,8,20]},
+    AVGO: {name:"Hock Tan",          dob:[1952,11,1]},
+    NOW:  {name:"Bill McDermott",    dob:[1961,8,18]},
+    PANW: {name:"Nikesh Arora",      dob:[1968,2,9]},
+    CRWD: {name:"George Kurtz",      dob:[1970,9,16]},
+    T:    {name:"John Stankey",      dob:[1963,6,17]},
+    VZ:   {name:"Hans Vestberg",     dob:[1965,9,13]},
+    SPOT: {name:"Daniel Ek",         dob:[1983,2,21]},
+    SNAP: {name:"Evan Spiegel",      dob:[1990,6,4]},
+    CME:  {name:"Terry Duffy",       dob:[1958,5,24]},
+    CVS:  {name:"David Joyner",      dob:[1966,1,1]},
+    CI:   {name:"David Cordani",     dob:[1966,3,1]},
+    PLD:  {name:"Hamid Moghadam",    dob:[1956,8,10]},
+    PG:   {name:"Jon Moeller",       dob:[1964,1,1]},
+    PM:   {name:"Jacek Olczak",      dob:[1966,1,1]},
+    MO:   {name:"Billy Gifford",     dob:[1966,1,1]},
+    F:    {name:"Jim Farley",        dob:[1962,7,7]},
+    GM:   {name:"Mary Barra",        dob:[1961,12,24]},
+    DAL:  {name:"Ed Bastian",        dob:[1957,4,8]},
+    MAR:  {name:"Tony Capuano",      dob:[1965,1,1]},
+    HLT:  {name:"Christopher Nassetta",dob:[1962,11,1]},
+    FTNT: {name:"Ken Xie",           dob:[1965,1,1]},
+    ACN:  {name:"Julie Sweet",       dob:[1967,9,7]},
+    INTU: {name:"Sasan Goodarzi",    dob:[1970,1,1]},
+    ANET: {name:"Jayshree Ullal",    dob:[1961,1,1]},
+    TTD:  {name:"Jeff Green",        dob:[1978,1,1]},
+    DASH: {name:"Tony Xu",           dob:[1984,3,3]},
+    APP:  {name:"Adam Foroughi",     dob:[1980,1,1]},
+    AFRM: {name:"Max Levchin",       dob:[1975,7,11]},
+    SMCI: {name:"Charles Liang",     dob:[1958,1,1]},
+    ARM:  {name:"Rene Haas",         dob:[1966,1,1]},
+    SHOP: {name:"Harley Finkelstein",dob:[1984,1,1]},
+    MELI: {name:"Marcos Galperin",   dob:[1971,10,31]},
+    NET:  {name:"Matthew Prince",    dob:[1980,1,1]},
+    ZM:   {name:"Eric Yuan",         dob:[1970,2,20]},
+    AXON: {name:"Rick Smith",        dob:[1969,5,3]},
+    DKNG: {name:"Jason Robins",      dob:[1980,1,1]},
+    BKNG: {name:"Glenn Fogel",       dob:[1963,1,1]},
+    LULU: {name:"Calvin McDonald",   dob:[1971,1,1]},
+    RL:   {name:"Patrice Louvet",    dob:[1965,1,1]},
+    KLAC: {name:"Rick Wallace",      dob:[1963,1,1]},
+    MRVL: {name:"Matt Murphy",       dob:[1968,1,1]},
+    HUBS: {name:"Yamini Rangan",     dob:[1975,1,1]},
+    RCL:  {name:"Jason Liberty",     dob:[1976,1,1]},
   };
 
   // ── Astronomy Engine ───────────────────────────────────────────────────────
@@ -2473,8 +2805,8 @@ function FinancialAstrology() {
       const combinedScore = ceoResult
         ? Math.max(-10, Math.min(10, r.score * 0.6 + ceoResult.score * 0.4))
         : r.score;
-      const combinedVerdict = combinedScore >= 4 ? "STRONG BULL" : combinedScore >= 2 ? "BULLISH" : combinedScore <= -4 ? "STRONG BEAR" : combinedScore <= -2 ? "BEARISH" : "NEUTRAL";
-      const combinedColor = combinedScore >= 4 ? "#00e676" : combinedScore >= 2 ? "#38bdf8" : combinedScore <= -4 ? "#ff1744" : combinedScore <= -2 ? "#ff5252" : "#f59e0b";
+      const combinedVerdict = combinedScore>=4?"STRONG BULL":combinedScore>=2?"BULLISH":combinedScore<=-4?"STRONG BEAR":combinedScore<=-2?"BEARISH":"NEUTRAL";
+      const combinedColor = combinedScore>=4?"#00e676":combinedScore>=2?"#38bdf8":combinedScore<=-4?"#ff1744":combinedScore<=-2?"#ff5252":"#f59e0b";
       setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date, ceoResult, combinedScore, combinedVerdict, combinedColor});
       setLoading(false);
     }, 100);
@@ -2491,8 +2823,8 @@ function FinancialAstrology() {
           const cr = analyzeStock(ceo.dob, TODAY);
           combined = Math.max(-10, Math.min(10, r.score * 0.6 + cr.score * 0.4));
         }
-        const verdict = combined >= 4 ? "STRONG BULL" : combined >= 2 ? "BULLISH" : combined <= -4 ? "STRONG BEAR" : combined <= -2 ? "BEARISH" : "NEUTRAL";
-        const verdictColor = combined >= 4 ? "#00e676" : combined >= 2 ? "#38bdf8" : combined <= -4 ? "#ff1744" : combined <= -2 ? "#ff5252" : "#f59e0b";
+        const verdict = combined>=4?"STRONG BULL":combined>=2?"BULLISH":combined<=-4?"STRONG BEAR":combined<=-2?"BEARISH":"NEUTRAL";
+        const verdictColor = combined>=4?"#00e676":combined>=2?"#38bdf8":combined<=-4?"#ff1744":combined<=-2?"#ff5252":"#f59e0b";
         return {symbol:sym, name:info.name, score:combined, stockScore:r.score, verdict, verdictColor};
       });
       results.sort((a,b) => b.score-a.score);
@@ -2589,50 +2921,6 @@ function FinancialAstrology() {
                   </div>
                   {scoreBar(result.score)}
                 </div>
-
-                {/* CEO Analysis */}
-                {result.ceoResult && (
-                  <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
-                      <div>
-                        <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>CEO PLANETARY ENERGY</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{result.ceoResult.ceoName}</div>
-                        <div style={{fontSize:10,color:"#3a6e9a"}}>Born: {result.ceoResult.ceoDob[2]}/{result.ceoResult.ceoDob[1]}/{result.ceoResult.ceoDob[0]}</div>
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:20,fontWeight:700,color:result.ceoResult.verdictColor}}>{result.ceoResult.score.toFixed(1)}</div>
-                        <div style={{fontSize:9,color:"#3a6e9a"}}>CEO score</div>
-                      </div>
-                    </div>
-                    <div style={{background:result.ceoResult.verdictColor+"22",border:"1px solid "+result.ceoResult.verdictColor+"44",borderRadius:5,padding:"6px 12px",textAlign:"center",marginBottom:10}}>
-                      <span style={{fontSize:13,fontWeight:700,color:result.ceoResult.verdictColor}}>{result.ceoResult.verdict}</span>
-                    </div>
-                    <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:6}}>TOP CEO ASPECTS</div>
-                    {result.ceoResult.aspects.slice(0,3).map((a,i) => {
-                      const isPos = a.score >= 0;
-                      const c = isPos ? "#00e676" : a.nature === "tense" ? "#ff5252" : "#f59e0b";
-                      return (
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid #0d2030"}}>
-                          <div style={{width:5,height:5,borderRadius:"50%",background:c,flexShrink:0}}/>
-                          <div style={{flex:1,fontSize:11}}>
-                            <span style={{color:"#38bdf8",fontWeight:700}}>{a.transit}</span>
-                            <span style={{color:"#3a6e9a",margin:"0 4px"}}>in {a.tSign}</span>
-                            <span style={{color:c,fontWeight:700}}>{a.aspect}</span>
-                            <span style={{color:"#3a6e9a",margin:"0 4px"}}>natal</span>
-                            <span style={{color:"#e8f4ff",fontWeight:700}}>{a.natal}</span>
-                          </div>
-                          <div style={{color:c,fontSize:11,fontWeight:700,flexShrink:0}}>{isPos?"+":""}{a.score.toFixed(2)}</div>
-                        </div>
-                      );
-                    })}
-                    {/* Combined score */}
-                    <div style={{marginTop:10,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 14px",textAlign:"center"}}>
-                      <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>COMBINED SCORE (60% Stock + 40% CEO)</div>
-                      <div style={{fontSize:20,fontWeight:700,color:result.combinedColor}}>{result.combinedVerdict}</div>
-                      <div style={{fontSize:14,color:result.combinedColor,marginTop:2}}>{result.combinedScore.toFixed(1)} / 10</div>
-                    </div>
-                  </div>
-                )}
 
                 {/* Moon phase */}
                 <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:14}}>
@@ -2736,7 +3024,7 @@ function FinancialAstrology() {
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:400}}>
                     <thead>
                       <tr style={{borderBottom:"1px solid #1e3a5a"}}>
-                        {["SYMBOL","NAME","COMBINED","STOCK ONLY","ENERGY","ACTION"].map(h=>(
+                        {["SYMBOL","NAME","SCORE","ENERGY","ACTION"].map(h=>(
                           <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
                         ))}
                       </tr>
@@ -2750,7 +3038,6 @@ function FinancialAstrology() {
                           <td style={{padding:"7px 8px"}}>
                             <span style={{color:r.verdictColor,fontWeight:700}}>{r.score.toFixed(1)}</span>
                           </td>
-                          <td style={{padding:"7px 8px",color:"#3a6e9a",fontSize:10}}>{r.stockScore ? r.stockScore.toFixed(1) : r.score.toFixed(1)}</td>
                           <td style={{padding:"7px 8px"}}>
                             <span style={{background:r.verdictColor+"22",color:r.verdictColor,border:"1px solid "+r.verdictColor+"44",borderRadius:4,padding:"1px 8px",fontSize:10,fontWeight:700}}>{r.verdict}</span>
                           </td>
@@ -2769,6 +3056,7 @@ function FinancialAstrology() {
     </div>
   );
 }
+
 
 // ─── CHART TAB ────────────────────────────────────────────────────────────────
 function ChartTab({trades, initialSym}) {
@@ -2901,7 +3189,7 @@ function ChartTab({trades, initialSym}) {
       </div>
 
       {/* MAIN AREA */}
-      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+      <div style={{flex:1,display:"flex",overflow:"hidden",flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
 
         {/* TRADINGVIEW CHART — YOUR ACCOUNT */}
         <div style={{flex:1,position:"relative",overflow:"hidden"}}>
@@ -2927,7 +3215,7 @@ function ChartTab({trades, initialSym}) {
         </div>
 
         {/* RIGHT PANEL — Trade Review */}
-        <div style={{width:250,minWidth:250,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{width:typeof window!=="undefined"&&window.innerWidth<768?"100%":250,minWidth:typeof window!=="undefined"&&window.innerWidth<768?0:250,background:"#080e1a",borderLeft:typeof window!=="undefined"&&window.innerWidth<768?"none":"1px solid #1e3a5a",borderTop:typeof window!=="undefined"&&window.innerWidth<768?"1px solid #1e3a5a":"none",display:"flex",flexDirection:"column",overflow:"hidden",maxHeight:typeof window!=="undefined"&&window.innerWidth<768?"40vh":"none"}}>
 
           {/* Selected trade detail */}
           {selectedTrade&&(
@@ -3124,8 +3412,8 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
   const sel=selRow!==null?results[selRow]:null;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="EMA PERIODS">
           {[["EMA 1 (Fast)",ema1,setEma1],["EMA 2 (Mid)",ema2,setEma2],["EMA 3 (Slow)",ema3,setEma3]].map(([l,v,s])=>(
             <div key={l} style={{marginBottom:9}}>
@@ -3181,7 +3469,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"▶ RUN EMA SCAN"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -3196,7 +3484,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>{lastScan?"No results matched filter.":"Press ▶ RUN EMA SCAN"}</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE","EMA1","EMA2","EMA3","SPREAD%","SLOPE","STRENGTH","BOUNCE","REJECT","SWING★","TREND","SCORE"].map(h=>
                   <th key={h} style={{padding:"7px 7px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -3229,7 +3517,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
         {sel&&(
@@ -3341,8 +3629,8 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
   const fullyAligned=results.filter(r=>r.aligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -3405,7 +3693,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SCAN ${direction}`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -3418,7 +3706,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SCAN to find HalfTrend signals</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()} BIAS`,`${tf2.toUpperCase()} CONFIRM`,`${tf3.toUpperCase()} ENTRY`,`${tf4.toUpperCase()} FINE`,"MATCH","REL VOL","ATR%","EMA DIST","SCORE","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -3495,7 +3783,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -3570,8 +3858,8 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
   const fullyAligned=results.filter(r=>r.fullyAligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <MobileSettingsPanel>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -3632,7 +3920,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SHA+HT ${direction} SCAN`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -3645,7 +3933,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SHA+HT SCAN to find signals</div>}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()}`,`${tf2.toUpperCase()}`,`${tf3.toUpperCase()}`,`${tf4.toUpperCase()}`,"MATCH","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -3690,7 +3978,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
                   </tr>;
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -3852,9 +4140,9 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
   const longs  = results.filter(r=>r.longReversal).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0}}>
+    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
       {/* LEFT PANEL */}
-      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
+      <MobileSettingsPanel>
         <Section title="TIMEFRAMES">
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <TFInput label="TF1 (Gap chart)" value={tf1} onChange={setTf1}/>
@@ -3919,7 +4207,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"🎯 SCAN REVERSALS"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.slice(0,5).join(", ")}</div>}
-      </div>
+      </MobileSettingsPanel>
 
       {/* RIGHT PANEL */}
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
@@ -3958,7 +4246,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
             </div>
           )}
           {results.length>0&&(
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
               <thead>
                 <tr style={{background:"#0a1520",position:"sticky",top:0,zIndex:1}}>
                   {["SYMBOL","TF","PRICE","200 EMA","EMA DIST %","GAP %","DIRECTION","CANDLES AGO","SCORE","ACTION"].map(h=>(
@@ -4033,7 +4321,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>
@@ -4100,82 +4388,93 @@ export default function App(){
     return sendPushover(pushKey, pushToken, "🔥 ATM MACHINE TEST", `Signal alert working!\n🕐 ${getETDateTime()}\n💰 Bondo Charity is watching!`);
   };
 
-  const tabs=[
-    {id:"ema",label:"📊 EMA",color:"#00b4d8"},
-    {id:"ht",label:"★ HALFTREND",color:"#e040fb"},
-    {id:"shaht",label:"🔥 SHA+HT",color:"#ff9800"},
-    {id:"reversal",label:"🎯 REVERSAL",color:"#ff9800"},
-    {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
-    {id:"chart",label:"📈 CHART",color:"#ff9800"},
-    {id:"pattern",label:"🔍 PATTERN AI",color:"#00e676"},
-    {id:"spike",label:"⚡ SPIKE",color:"#f59e0b"},
-    {id:"gap",label:"🌅 GAP",color:"#38bdf8"},
-    {id:"breadth",label:"🌡️ BREADTH",color:"#e040fb"},
-    {id:"premarket",label:"🌙 PRE+HOD",color:"#f59e0b"},
-    {id:"astro",label:"🪐 ASTRO",color:"#e040fb"},
+  const tabRows=[
+    [
+      {id:"ema",     label:"📊 EMA",      color:"#00b4d8"},
+      {id:"ht",      label:"★ HT",        color:"#e040fb"},
+      {id:"shaht",   label:"🔥 SHA+HT",   color:"#ff9800"},
+      {id:"reversal",label:"🎯 REVERSAL", color:"#ff9800"},
+      {id:"pnl",     label:"🏦 FUND",     color:"#00e676"},
+      {id:"chart",   label:"📈 CHART",    color:"#ff9800"},
+    ],
+    [
+      {id:"pattern", label:"🔍 PATTERN",  color:"#00e676"},
+      {id:"spike",   label:"⚡ SPIKE",    color:"#f59e0b"},
+      {id:"gap",     label:"🌅 GAP",      color:"#38bdf8"},
+      {id:"breadth", label:"🌡️ BREADTH",  color:"#e040fb"},
+      {id:"premarket",label:"🌙 PRE+HOD", color:"#f59e0b"},
+      {id:"astro",   label:"🪐 ASTRO",    color:"#e040fb"},
+    ],
   ];
+  const tabs = tabRows.flat();
 
+  const isMobile = useMobile();
   const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion, goToChart};
 
   return(
-    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column",maxWidth:"100vw",overflowX:"hidden"}}>
       {/* HEADER */}
-      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,transition:"all 0.3s"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:10,height:10,borderRadius:"50%",background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
-          <span style={{fontSize:15,fontWeight:700,color:"#e8f4ff",letterSpacing:2}}>ALO TRADING SCANNER</span>
-          <span style={{fontSize:10,color:"#ff9800",padding:"2px 8px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
-          {flashAlert&&<span style={{fontSize:11,color:"#ff9800",fontWeight:700,animation:"pulse 0.5s infinite"}}>🚨 SIGNAL FIRED!</span>}
+      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:isMobile?"8px 10px":"10px 20px",display:"flex",flexDirection:"column",gap:6,transition:"all 0.3s"}}>
+        {/* Row 1: Logo */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
+            <span style={{fontSize:isMobile?11:15,fontWeight:700,color:"#e8f4ff",letterSpacing:isMobile?1:2}}>ALO TRADING SCANNER</span>
+            <span style={{fontSize:9,color:"#ff9800",padding:"2px 6px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
+            {flashAlert&&<span style={{fontSize:10,color:"#ff9800",fontWeight:700}}>🚨 SIGNAL!</span>}
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:700,flexWrap:"wrap"}}>
+        {/* Row 2: Watchlist */}
+        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
           <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1,whiteSpace:"nowrap"}}>WATCHLIST</span>
-          {/* Preset dropdown */}
           <select onChange={e=>{if(e.target.value)updateSymbols(WATCHLIST_PRESETS[e.target.value].join(","));e.target.value="";}}
-            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
-            <option value="">📋 Load Preset...</option>
-            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k} ({WATCHLIST_PRESETS[k].length})</option>)}
+            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none",maxWidth:isMobile?130:200}}>
+            <option value="">📋 Preset...</option>
+            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k}</option>)}
           </select>
           <input value={symbols} onChange={e=>updateSymbols(e.target.value)}
-            style={{flex:1,minWidth:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length} stocks</span>
-          {/* Live filter */}
-          <div style={{display:"flex",alignItems:"center",gap:4}}>
-            <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
-              style={{width:45,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-            <span style={{fontSize:9,color:"#2a5a7a"}}>$ min</span>
-            <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
-              style={{width:65,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-            <span style={{fontSize:9,color:"#2a5a7a"}}>vol min</span>
-            <button onClick={runFilter} disabled={filtering}
-              style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-              {filtering?"⏳ "+filterProg:"🔍 FILTER"}
-            </button>
-            {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
-          </div>
+            style={{flex:1,minWidth:isMobile?80:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 8px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length}&#x2009;stk</span>
+        </div>
+        {/* Row 3: Filter */}
+        <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+          <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
+            style={{width:48,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+          <span style={{fontSize:9,color:"#2a5a7a"}}>$min</span>
+          <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
+            style={{width:60,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+          <span style={{fontSize:9,color:"#2a5a7a"}}>vol</span>
+          <button onClick={runFilter} disabled={filtering}
+            style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+            {filtering?"⏳ "+filterProg:"🔍 FILTER"}
+          </button>
+          {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
         </div>
       </div>
 
-      {/* TABS */}
-      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex"}}>
-        {tabs.map(tab=>(
-          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{padding:"10px 18px",fontFamily:"inherit",fontSize:11,fontWeight:700,letterSpacing:1,
-            background:activeTab===tab.id?"#0d1e30":"transparent",
-            borderBottom:activeTab===tab.id?`2px solid ${tab.color}`:"2px solid transparent",
-            color:activeTab===tab.id?tab.color:"#3a6e9a",border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap"}}>
-            {tab.label}
-          </button>
+      {/* TABS — 2 rows */}
+      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
+        {tabRows.map((row,ri)=>(
+          <div key={ri} style={{display:"flex",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",borderBottom:ri===0?"1px solid #1e3a5a":"none"}}>
+            {row.map(tab=>(
+              <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{
+                padding:isMobile?"7px 8px":"8px 14px",
+                fontFamily:"inherit",fontSize:isMobile?9:10,fontWeight:700,letterSpacing:0,
+                background:activeTab===tab.id?"#0d1e30":"transparent",
+                borderBottom:activeTab===tab.id?`2px solid ${tab.color}`:"2px solid transparent",
+                color:activeTab===tab.id?tab.color:"#3a6e9a",
+                border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap",flexShrink:0}}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 
       {/* CONTENT */}
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-        {/* LEFT RAIL — Alert settings + Signal Log (always visible) */}
-        {activeTab!=="pnl"&&(
-          <div style={{width:0,minWidth:0,display:"none"}}/>
-        )}
-
         {/* SCANNER AREA */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           {activeTab==="ema"&&<EMAScanner {...scannerProps}/>}
           {activeTab==="ht"&&<HalfTrendScanner {...scannerProps}/>}
           {activeTab==="shaht"&&<SHAHTScanner {...scannerProps}/>}
@@ -4198,7 +4497,8 @@ export default function App(){
           {activeTab==="astro"&&<FinancialAstrology/>}
         </div>
 
-        {/* RIGHT SIDEBAR — Always visible */}
+        {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
+        {!isMobile&&(
         <div style={{width:220,minWidth:220,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
           <AlertSettings
             pushKey={pushKey} setPushKey={setPushKey}
@@ -4208,6 +4508,7 @@ export default function App(){
           />
           <SignalLogPanel logVersion={logVersion}/>
         </div>
+        )}
       </div>
 
       <style>{`
@@ -4217,6 +4518,8 @@ export default function App(){
         ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:3px;}
         input[type=range]{height:4px;}
         @keyframes pulse{0%{opacity:1;}50%{opacity:0.4;}100%{opacity:1;}}
+        /* hide scrollbar on tab bar */
+        div::-webkit-scrollbar:horizontal{height:0;}
       `}</style>
     </div>
   );
