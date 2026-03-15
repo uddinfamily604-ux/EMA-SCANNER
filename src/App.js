@@ -1515,6 +1515,247 @@ function BondoFund() {
 }
 
 
+// ─── CHART PATTERN ANALYZER ───────────────────────────────────────────────────
+function ChartPatternAnalyzer() {
+  const [image, setImage] = React.useState(null);
+  const [imageData, setImageData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [dragging, setDragging] = React.useState(false);
+  const fileRef = React.useRef();
+
+  const processFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const url = URL.createObjectURL(file);
+    setImage(url);
+    setResult(null);
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(",")[1];
+      setImageData({ base64, type: file.type });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    processFile(e.dataTransfer.files[0]);
+  };
+
+  React.useEffect(() => {
+    const handler = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) { processFile(item.getAsFile()); break; }
+      }
+    };
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+  }, []);
+
+  const analyze = async () => {
+    if (!imageData) return;
+    setLoading(true); setResult(null); setError(null);
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: `You are an expert technical analysis assistant embedded in the ATM Machine trading scanner — Alo's proprietary system combining SHA + HalfTrend signals.
+Analyze the uploaded stock chart image and respond ONLY in this exact structured format — no preamble, no markdown:
+
+Pattern: [chart pattern name, e.g. Bull Flag, Head & Shoulders, Double Bottom, Ascending Triangle, Wedge, etc.]
+Signal: [Bullish / Bearish / Neutral]
+Bias: [Bullish / Bearish / Neutral]
+Entry Zone: [price level or zone if visible, else "See chart"]
+Target: [price target if estimable, else "See chart"]
+Stop Loss: [stop level if estimable, else "See chart"]
+Confidence: [0-100 number only]
+Notes: [2-3 sentences of sharp, actionable insight. Mention key levels, volume if visible, and whether this aligns with a momentum or reversal setup.]
+
+If no clear pattern is visible, say Pattern: No clear pattern and explain in Notes.`,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: imageData.type, data: imageData.base64 } },
+              { type: "text", text: "Analyze this stock chart and identify the pattern." }
+            ]
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content?.map(b => b.text || "").join("").trim();
+      if (text) setResult(text);
+      else setError("No analysis returned. Try a cleaner chart image.");
+    } catch {
+      setError("Analysis failed. Check connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const get = (key) => {
+    if (!result) return null;
+    const line = result.split("\n").find(l => l.toLowerCase().startsWith(key.toLowerCase()));
+    return line ? line.replace(/^[^:]+:\s*/i, "").trim() : null;
+  };
+
+  const pattern = get("Pattern");
+  const signal = get("Signal");
+  const bias = get("Bias");
+  const entry = get("Entry Zone");
+  const target = get("Target");
+  const stop = get("Stop Loss");
+  const confidence = get("Confidence");
+  const notes = get("Notes");
+  const confNum = confidence ? parseInt(confidence) : null;
+  const signalColor = signal?.toLowerCase().includes("bull") ? "#00e676" : signal?.toLowerCase().includes("bear") ? "#ff5252" : "#38bdf8";
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:"16px",background:"#080e1a",fontFamily:"monospace"}}>
+      <div style={{maxWidth:700,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>ATM MACHINE v6.0 · AI MODULE</div>
+          <div style={{fontSize:18,fontWeight:700,color:"#e8f4ff",letterSpacing:"-0.01em"}}>📊 Chart Pattern Analyzer</div>
+          <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>Upload, drag, or Ctrl+V paste a chart → AI identifies the pattern</div>
+        </div>
+
+        {/* Drop Zone */}
+        <div
+          onClick={() => fileRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          style={{
+            border:`2px dashed ${dragging?"#00e676":"#1e3a5a"}`,
+            borderRadius:8, padding:"28px 16px", textAlign:"center",
+            cursor:"pointer", background:dragging?"#00e67608":"#0d1e30",
+            transition:"all 0.2s", marginBottom:12
+          }}
+        >
+          <div style={{fontSize:28,marginBottom:8}}>📈</div>
+          <div style={{color:"#e8f4ff",fontSize:13,fontWeight:600,marginBottom:4}}>Drop chart here, click to browse, or Ctrl+V to paste</div>
+          <div style={{color:"#3a6e9a",fontSize:11}}>JPG · PNG · WEBP — TradingView screenshots work perfectly</div>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
+        </div>
+
+        {/* Preview */}
+        {image && (
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:6}}>CHART PREVIEW</div>
+            <div style={{border:"1px solid #1e3a5a",borderRadius:6,overflow:"hidden",position:"relative"}}>
+              <img src={image} alt="Chart" style={{width:"100%",display:"block",maxHeight:300,objectFit:"contain",background:"#000"}}/>
+              <button onClick={e=>{e.stopPropagation();setImage(null);setImageData(null);setResult(null);}}
+                style={{position:"absolute",top:6,right:6,background:"#00000099",border:"none",color:"#e8f4ff",borderRadius:4,padding:"3px 8px",cursor:"pointer",fontSize:11}}>
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Analyze Button */}
+        {imageData && !loading && (
+          <button onClick={analyze} style={{
+            width:"100%",padding:"12px 0",
+            background:"linear-gradient(135deg,#00e67622,#00e67611)",
+            border:"1px solid #00e67666",borderRadius:6,
+            color:"#00e676",fontSize:12,fontWeight:700,letterSpacing:"0.1em",
+            cursor:"pointer",fontFamily:"monospace",marginBottom:4
+          }}>⚡ ANALYZE PATTERN</button>
+        )}
+
+        {/* Loading */}
+        {loading && (
+          <div style={{textAlign:"center",padding:32}}>
+            <div style={{width:36,height:36,borderRadius:"50%",border:"3px solid #1e3a5a",borderTop:"3px solid #00e676",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>
+            <div style={{color:"#3a6e9a",fontSize:12,letterSpacing:"0.08em"}}>ANALYZING CHART...</div>
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div style={{background:"#ff525211",border:"1px solid #ff525244",borderRadius:6,padding:12,color:"#ff5252",fontSize:12,marginTop:8}}>{error}</div>
+        )}
+
+        {/* Result Card */}
+        {result && (
+          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:18,marginTop:12}}>
+
+            {/* Pattern + Signal */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.12em",marginBottom:3}}>PATTERN DETECTED</div>
+                <div style={{fontSize:17,fontWeight:700,color:"#e8f4ff"}}>{pattern||"—"}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {signal&&<span style={{background:signalColor+"22",color:signalColor,border:`1px solid ${signalColor}44`,borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{signal}</span>}
+                {bias&&<span style={{background:"#f59e0b22",color:"#f59e0b",border:"1px solid #f59e0b44",borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{bias}</span>}
+              </div>
+            </div>
+
+            {/* Metrics */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+              {[["ENTRY ZONE",entry,"#38bdf8"],["TARGET",target,"#00e676"],["STOP LOSS",stop,"#ff5252"]].map(([lbl,val,col])=>(
+                <div key={lbl} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 11px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:3}}>{lbl}</div>
+                  <div style={{color:val?col:"#3a6e9a",fontSize:12,fontWeight:600}}>{val||"N/A"}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Confidence Bar */}
+            {confNum&&(
+              <div style={{marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em"}}>CONFIDENCE</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"#f59e0b"}}>{confNum}%</span>
+                </div>
+                <div style={{height:5,background:"#1e3a5a",borderRadius:3}}>
+                  <div style={{height:"100%",width:`${confNum}%`,background:confNum>=70?"#00e676":confNum>=50?"#f59e0b":"#ff5252",borderRadius:3,transition:"width 1s ease"}}/>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {notes&&(
+              <div style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 12px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:5}}>🤖 BONDO NOTES</div>
+                <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.7}}>{notes}</div>
+              </div>
+            )}
+
+            {!pattern&&(
+              <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{result}</div>
+            )}
+          </div>
+        )}
+
+        {/* Tips */}
+        {!image&&(
+          <div style={{marginTop:16,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:14}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>💡 PRO TIPS</div>
+            {["Use TradingView's camera icon to download a clean chart screenshot","Crop out toolbars and side panels for best accuracy","Works with any timeframe — 5m, 15m, 1H, Daily","Ctrl+V to paste a screenshot directly from clipboard"].map((tip,i)=>(
+              <div key={i} style={{color:"#3a6e9a",fontSize:11,marginBottom:5,display:"flex",gap:6}}>
+                <span style={{color:"#00e676"}}>→</span>{tip}
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
 // ─── CHART TAB ────────────────────────────────────────────────────────────────
 function ChartTab({trades, initialSym}) {
   const [chartSym, setChartSym] = useState(initialSym||"SPY");
@@ -2852,6 +3093,7 @@ export default function App(){
     {id:"reversal",label:"🎯 REVERSAL",color:"#ff9800"},
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
+    {id:"pattern",label:"🔍 PATTERN AI",color:"#00e676"},
   ];
 
   const isMobile = useMobile();
@@ -2929,6 +3171,11 @@ export default function App(){
           {activeTab==="chart"&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
               <ChartTab trades={getBondoFundData()} initialSym={chartSym}/>
+            </div>
+          )}
+          {activeTab==="pattern"&&(
+            <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+              <ChartPatternAnalyzer/>
             </div>
           )}
         </div>
