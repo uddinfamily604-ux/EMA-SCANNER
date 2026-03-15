@@ -28,7 +28,7 @@ if (typeof document !== "undefined" && !document.getElementById("atm-mobile-css"
 }
 
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
-const ANTHROPIC_KEY = "YOUR_ANTHROPIC_API_KEY_HERE";
+const ANTHROPIC_KEY = process.env.REACT_APP_ANTHROPIC_KEY || "";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
