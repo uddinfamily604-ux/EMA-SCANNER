@@ -1,34 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
-// ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
-function useMobile() {
-  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 768);
-  useEffect(() => {
-    const fn = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", fn);
-    return () => window.removeEventListener("resize", fn);
-  }, []);
-  return isMobile;
-}
-// Inject global mobile CSS once
-if (typeof document !== "undefined" && !document.getElementById("atm-mobile-css")) {
-  const s = document.createElement("style");
-  s.id = "atm-mobile-css";
-  s.textContent = `
-    *{box-sizing:border-box;}
-    body{overflow-x:hidden;-webkit-text-size-adjust:100%;}
-    ::-webkit-scrollbar{width:4px;height:4px;}
-    ::-webkit-scrollbar-track{background:#080e1a;}
-    ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:2px;}
-    @media(max-width:768px){
-      input,button,select{font-size:16px!important;}
-    }
-  `;
-  document.head.appendChild(s);
-}
-
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
-const ANTHROPIC_KEY = process.env.REACT_APP_ANTHROPIC_KEY || "";
 const BASE_URL = "https://api.polygon.io";
 const DEFAULT_SYMBOLS = ["SPY","QQQ","AAPL","MSFT","NVDA","TSLA","AMZN","META","GOOGL","AMD","SOFI","PLTR","MARA","COIN","RIVN","BABA","BAC","JPM","GS","IWM"];
 
@@ -83,60 +55,12 @@ async function sendPushover(userKey, apiToken, title, message) {
 let SIGNAL_LOG = [];
 try { SIGNAL_LOG = JSON.parse(localStorage.getItem("alo_signal_log")||"[]"); } catch(e){}
 function addSignalLog(entry) {
-  const enriched = {
-    ...entry,
-    id: Date.now(),
-    entryPrice: parseFloat(entry.price),
-    p15: null, p30: null, p60: null, pEOD: null,   // price snapshots
-    pnl15: null, pnl30: null, pnl60: null,           // % moves
-    checked15: false, checked30: false, checked60: false,
-  };
-  SIGNAL_LOG = [enriched, ...SIGNAL_LOG].slice(0, 200);
+  SIGNAL_LOG = [entry, ...SIGNAL_LOG].slice(0,100);
   try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
 }
 function clearSignalLog() {
   SIGNAL_LOG = [];
   try { localStorage.removeItem("alo_signal_log"); } catch(e){}
-}
-function saveSignalLog() {
-  try { localStorage.setItem("alo_signal_log", JSON.stringify(SIGNAL_LOG)); } catch(e){}
-}
-
-// ── Update signal performance with a fetched price ──
-async function checkSignalPerformance() {
-  const now = Date.now();
-  let updated = false;
-  for(let i = 0; i < SIGNAL_LOG.length; i++) {
-    const s = SIGNAL_LOG[i];
-    if(!s.id || !s.entryPrice) continue;
-    const age = (now - s.id) / 1000 / 60; // minutes since signal
-    const needsCheck = (!s.checked15 && age >= 15) || (!s.checked30 && age >= 30) || (!s.checked60 && age >= 60);
-    if(!needsCheck) continue;
-    try {
-      const res = await fetch(`https://api.polygon.io/v2/last/trade/${s.symbol}?apiKey=${API_KEY}`);
-      const data = await res.json();
-      const cur = data.results?.p;
-      if(!cur) continue;
-      const pct = ((cur - s.entryPrice) / s.entryPrice * 100);
-      const isLong = s.direction === "BUY";
-      const signedPct = isLong ? pct : -pct; // positive = signal was correct
-      if(!s.checked15 && age >= 15) {
-        SIGNAL_LOG[i] = {...s, checked15:true, p15:cur.toFixed(2), pnl15:signedPct.toFixed(2)};
-        s.checked15 = true; s.p15 = cur.toFixed(2); s.pnl15 = signedPct.toFixed(2);
-        updated = true;
-      }
-      if(!s.checked30 && age >= 30) {
-        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked30:true, p30:cur.toFixed(2), pnl30:signedPct.toFixed(2)};
-        updated = true;
-      }
-      if(!s.checked60 && age >= 60) {
-        SIGNAL_LOG[i] = {...SIGNAL_LOG[i], checked60:true, p60:cur.toFixed(2), pnl60:signedPct.toFixed(2)};
-        updated = true;
-      }
-    } catch(e) {}
-  }
-  if(updated) saveSignalLog();
-  return updated;
 }
 
 // ─── P&L TRACKER ─────────────────────────────────────────────────────────────
@@ -566,27 +490,6 @@ function Section({title,children}){
     {children}
   </div>;
 }
-// Mobile-friendly collapsible settings panel
-function MobileSettingsPanel({width=250, children, style={}}){
-  const isMobile = useMobile();
-  const [open, setOpen] = useState(false);
-  if(!isMobile){
-    return <div style={{width,minWidth:width,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto",...style}}>{children}</div>;
-  }
-  return(
-    <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",...style}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:"#00b4d8",fontFamily:"'Courier New',monospace",fontSize:10,fontWeight:700,letterSpacing:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <span>⚙️ SETTINGS</span>
-        <span style={{fontSize:14}}>{open?"▲":"▼"}</span>
-      </button>
-      {open&&(
-        <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:12,borderTop:"1px solid #1e3a5a"}}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
 function Stat({label,value,color="#c9d8e8"}){
   return <div style={{display:"flex",alignItems:"center",gap:5}}>
     <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1}}>{label}</span>
@@ -702,58 +605,17 @@ function AlertSettings({pushKey,setPushKey,pushToken,setPushToken,soundOn,setSou
 // ─── SIGNAL LOG PANEL ─────────────────────────────────────────────────────────
 function SignalLogPanel({logVersion}) {
   const [show, setShow] = useState(false);
-  const [tick, setTick] = useState(0);
-
-  // Auto-check performance every 60 seconds
-  useEffect(()=>{
-    const interval = setInterval(async()=>{
-      const updated = await checkSignalPerformance();
-      if(updated) setTick(n=>n+1);
-    }, 60000);
-    return ()=>clearInterval(interval);
-  },[]);
-
-  const handleClear = ()=>{ clearSignalLog(); setTick(n=>n+1); };
-
-  // Stats calculation
-  const completed = SIGNAL_LOG.filter(s=>s.pnl60!==null);
-  const wins = completed.filter(s=>parseFloat(s.pnl60)>0);
-  const losses = completed.filter(s=>parseFloat(s.pnl60)<=0);
-  const winRate = completed.length>0?((wins.length/completed.length)*100).toFixed(0):null;
-  const avgMove = completed.length>0?(completed.reduce((a,s)=>a+parseFloat(s.pnl60),0)/completed.length).toFixed(2):null;
-
-  const PnlBadge = ({val, label})=>{
-    if(val===null) return <span style={{fontSize:8,color:"#2a5a7a",padding:"1px 4px",border:"1px solid #1e3a5a",borderRadius:2}}>{label}…</span>;
-    const v = parseFloat(val);
-    const c = v>0?"#00e676":v<0?"#ff1744":"#ffeb3b";
-    return <span style={{fontSize:8,color:c,padding:"1px 4px",border:`1px solid ${c}`,borderRadius:2,fontWeight:700}}>{label} {v>0?"+":""}{v}%</span>;
-  };
-
+  const [,forceUpdate] = useState(0);
+  const handleClear = ()=>{ clearSignalLog(); forceUpdate(n=>n+1); };
   return (
     <div style={{borderTop:"1px solid #1e3a5a",padding:"8px 12px"}}>
       <button onClick={()=>setShow(s=>!s)} style={{width:"100%",padding:"6px",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#ffeb3b",fontSize:10,fontFamily:"inherit",fontWeight:700,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span>📋 SIGNAL LOG ({SIGNAL_LOG.length})</span>
-        <span style={{display:"flex",gap:6,alignItems:"center"}}>
-          {winRate!==null&&<span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744"}}>WIN {winRate}%</span>}
-          {avgMove!==null&&<span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744"}}>AVG {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>}
-          <span>{show?"▲":"▼"}</span>
-        </span>
+        <span>{show?"▲":"▼"}</span>
       </button>
       {show&&(
-        <div style={{maxHeight:320,overflowY:"auto",marginTop:6}}>
+        <div style={{maxHeight:220,overflowY:"auto",marginTop:6}}>
           <button onClick={handleClear} style={{width:"100%",padding:"4px",marginBottom:6,background:"#1a0a00",border:"1px solid #ff5722",borderRadius:3,color:"#ff5722",fontSize:9,fontFamily:"inherit",cursor:"pointer"}}>🗑 CLEAR LOG</button>
-
-          {/* Stats bar */}
-          {completed.length>0&&(
-            <div style={{display:"flex",gap:6,marginBottom:8,padding:"6px 8px",background:"#0a1520",borderRadius:4,border:"1px solid #1e3a5a",flexWrap:"wrap"}}>
-              <span style={{fontSize:9,color:"#3a6e9a"}}>📊 {completed.length} completed</span>
-              <span style={{fontSize:9,color:"#00e676"}}>✅ {wins.length} wins</span>
-              <span style={{fontSize:9,color:"#ff1744"}}>❌ {losses.length} losses</span>
-              <span style={{fontSize:9,color:parseFloat(winRate)>=50?"#00e676":"#ff1744",fontWeight:700}}>WIN RATE: {winRate}%</span>
-              <span style={{fontSize:9,color:parseFloat(avgMove)>=0?"#00e676":"#ff1744",fontWeight:700}}>AVG 1HR: {parseFloat(avgMove)>=0?"+":""}{avgMove}%</span>
-            </div>
-          )}
-
           {SIGNAL_LOG.length===0&&<div style={{fontSize:10,color:"#2a5a7a",textAlign:"center",padding:10}}>No signals yet</div>}
           {SIGNAL_LOG.map((s,i)=>(
             <div key={i} style={{padding:"6px 8px",marginBottom:4,background:s.direction==="SELL"?"#1a050a":"#051a0a",border:`1px solid ${s.direction==="SELL"?"#ff1744":"#00e676"}`,borderRadius:4}}>
@@ -761,15 +623,8 @@ function SignalLogPanel({logVersion}) {
                 <span style={{fontSize:12,fontWeight:700,color:"#e8f4ff"}}>{s.symbol}</span>
                 <span style={{fontSize:9,color:s.direction==="SELL"?"#ff1744":"#00e676",fontWeight:700}}>★ {s.direction}</span>
               </div>
-              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · Entry: <span style={{color:"#e8f4ff",fontWeight:700}}>${s.price}</span></div>
+              <div style={{fontSize:9,color:"#3a6e9a",marginTop:2}}>{s.tab} · ${s.price}</div>
               <div style={{fontSize:9,color:"#ffeb3b",marginTop:2}}>🕐 {s.timestamp}</div>
-              {/* Performance badges */}
-              <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
-                <PnlBadge val={s.pnl15} label="15m"/>
-                <PnlBadge val={s.pnl30} label="30m"/>
-                <PnlBadge val={s.pnl60} label="1hr"/>
-                {s.p15&&<span style={{fontSize:8,color:"#2a5a7a"}}>→ ${s.p15}</span>}
-              </div>
             </div>
           ))}
         </div>
@@ -893,9 +748,6 @@ function BondoFund() {
   const [liveQuote, setLiveQuote] = useState(null);
   const [closingPrices, setClosingPrices] = useState({});
   const [fetchingClose, setFetchingClose] = useState({});
-  const [posAction, setPosAction] = useState({}); // {id: "close"|"add"|"partial"}
-  const [addInputs, setAddInputs] = useState({});   // {id: {price, qty}}
-  const [partialInputs, setPartialInputs] = useState({}); // {id: {price, qty}}
   const symDebounceRef = useRef(null);
   const priceTimerRef = useRef({});
 
@@ -1041,55 +893,6 @@ function BondoFund() {
       const pnl = calcPnl(t.direction, t.type, t.entry, exitPrice, t.qty);
       return {...t, exit:exitPrice, pnl, open:false, closedAt:getETDateTime()};
     });
-    saveBondoFund(updated); setTrades(updated);
-  };
-
-  // ── Add to existing position (avg down/up) ──
-  const addToPosition = (id, addPrice, addQty) => {
-    const price = parseFloat(addPrice);
-    const qty = parseFloat(addQty);
-    if(!price || !qty || qty <= 0) return;
-    const updated = trades.map(t => {
-      if(t.id !== id) return t;
-      const newQty = parseFloat(t.qty) + qty;
-      // Weighted average entry price
-      const newAvgEntry = ((parseFloat(t.entry) * parseFloat(t.qty)) + (price * qty)) / newQty;
-      const note = (t.note||"") + ` +${qty}@$${price}`;
-      return {...t, qty: newQty, entry: newAvgEntry.toFixed(2), note: note.trim()};
-    });
-    saveBondoFund(updated); setTrades(updated);
-  };
-
-  // ── Partial close ──
-  const partialClose = (id, exitPrice, sellQty) => {
-    const price = parseFloat(exitPrice);
-    const qty = parseFloat(sellQty);
-    if(!price || !qty || qty <= 0) return;
-    const trade = trades.find(t => t.id === id);
-    if(!trade) return;
-    const remainQty = parseFloat(trade.qty) - qty;
-    if(remainQty < 0) { alert("Cannot sell more than you hold!"); return; }
-    // Record partial close as a closed trade
-    const partialPnl = calcPnl(trade.direction, trade.type, trade.entry, price, qty);
-    const closedPartial = {
-      ...trade,
-      id: Date.now(),
-      qty: qty,
-      exit: price,
-      pnl: partialPnl,
-      open: false,
-      closedAt: getETDateTime(),
-      note: `Partial close of ${trade.symbol} (${qty} of ${trade.qty})`,
-    };
-    let updated;
-    if(remainQty === 0) {
-      // Full close via partial
-      updated = trades.map(t => t.id === id ? {...t, exit:price, pnl:partialPnl, open:false, closedAt:getETDateTime()} : t);
-    } else {
-      // Keep remaining open, add closed partial as new entry
-      updated = trades.map(t => t.id === id ? {...t, qty: remainQty} : t);
-      updated = [...updated, closedPartial];
-    }
     saveBondoFund(updated); setTrades(updated);
   };
 
@@ -1260,117 +1063,43 @@ function BondoFund() {
                   <span style={{color:"#2a4a6a"}}> · Opened: {t.timestamp}</span>
                 </div>
 
-                {/* POSITION ACTIONS — ADD / PARTIAL / CLOSE */}
+                {/* CLOSE POSITION */}
                 <div style={{background:"#080e1a",borderRadius:6,padding:"10px",border:"1px solid #1e5a3a"}}>
-                  {/* Tab selector */}
-                  <div style={{display:"flex",gap:4,marginBottom:8}}>
-                    {[["close","✓ CLOSE","#00e676"],["add","➕ ADD","#ffeb3b"],["partial","➖ PARTIAL","#ff9800"]].map(([key,label,color])=>(
-                      <button key={key} onClick={()=>setPosAction(p=>({...p,[t.id]:p[t.id]===key?null:key}))}
-                        style={{flex:1,padding:"5px 4px",fontSize:9,fontWeight:700,fontFamily:"inherit",cursor:"pointer",borderRadius:3,
-                          background:posAction[t.id]===key?color+"22":"#0d1b2e",
-                          border:`1px solid ${posAction[t.id]===key?color:"#1e3a5a"}`,
-                          color:posAction[t.id]===key?color:"#3a6e9a"}}>
-                        {label}
-                      </button>
-                    ))}
+                  <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:8}}>CLOSE POSITION</div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <input
+                      value={closingPrices[t.id]||""}
+                      onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
+                      placeholder="Exit price"
+                      style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,
+                        color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}
+                    />
+                    <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
+                      style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,
+                        color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                      {fetchingClose[t.id]?"⟳":"📡 LIVE"}
+                    </button>
+                    <button onClick={()=>closePosition(t.id)}
+                      disabled={!closingPrices[t.id]}
+                      style={{padding:"8px 14px",
+                        background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
+                        border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,
+                        borderRadius:4,color:closingPrices[t.id]?"#00e676":"#2a5a7a",
+                        fontSize:11,fontFamily:"inherit",cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
+                      ✓ CLOSE
+                    </button>
                   </div>
-
-                  {/* CLOSE */}
-                  {(posAction[t.id]==="close"||!posAction[t.id])&&(
-                    <div>
-                      <div style={{fontSize:9,color:"#00e676",fontWeight:700,marginBottom:6}}>CLOSE ALL {t.qty} SHARES</div>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <input value={closingPrices[t.id]||""} onChange={e=>setClosingPrices(p=>({...p,[t.id]:e.target.value}))}
-                          placeholder="Exit price" style={{flex:1,background:"#0d1b2e",border:"1px solid #00e676",borderRadius:4,color:"#00e676",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>fetchClosePrice(t.id,t.symbol)}
-                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
-                        </button>
-                        <button onClick={()=>closePosition(t.id)} disabled={!closingPrices[t.id]}
-                          style={{padding:"8px 14px",background:closingPrices[t.id]?"linear-gradient(135deg,#0d3b1a,#0a5530)":"#0d1b2e",
-                            border:`1px solid ${closingPrices[t.id]?"#00e676":"#1e3a5a"}`,borderRadius:4,
-                            color:closingPrices[t.id]?"#00e676":"#2a5a7a",fontSize:11,fontFamily:"inherit",
-                            cursor:closingPrices[t.id]?"pointer":"not-allowed",fontWeight:700}}>
-                          ✓ CLOSE ALL
-                        </button>
+                  {/* Preview P&L on close */}
+                  {closingPrices[t.id]&&(()=>{
+                    const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
+                    const col = preview>=0?"#00e676":"#ff1744";
+                    return (
+                      <div style={{marginTop:6,display:"flex",gap:12}}>
+                        <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
+                        <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
                       </div>
-                      {closingPrices[t.id]&&(()=>{
-                        const preview = calcPnl(t.direction,t.type,t.entry,closingPrices[t.id],t.qty);
-                        const col = preview>=0?"#00e676":"#ff1744";
-                        return <div style={{marginTop:6,display:"flex",gap:12}}>
-                          <span style={{fontSize:12,fontWeight:700,color:col}}>{preview>=0?"+":""}${preview.toFixed(2)}</span>
-                          <span style={{fontSize:9,color:"#00e676"}}>🙏 Bondo: ${Math.max(0,preview*0.2).toFixed(2)}</span>
-                        </div>;
-                      })()}
-                    </div>
-                  )}
-
-                  {/* ADD TO POSITION */}
-                  {posAction[t.id]==="add"&&(
-                    <div>
-                      <div style={{fontSize:9,color:"#ffeb3b",fontWeight:700,marginBottom:6}}>ADD TO POSITION · Avg Entry: ${t.entry}</div>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <input placeholder="Add price" value={addInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
-                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
-                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setAddInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
-                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
-                        </button>
-                        <input placeholder="Qty" value={addInputs[t.id]?.qty||""}
-                          onChange={e=>setAddInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
-                          style={{width:60,background:"#0d1b2e",border:"1px solid #ffeb3b",borderRadius:4,color:"#ffeb3b",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>{ addToPosition(t.id, addInputs[t.id]?.price ?? closingPrices[t.id], addInputs[t.id]?.qty); setAddInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
-                          disabled={!(addInputs[t.id]?.price||closingPrices[t.id])||!addInputs[t.id]?.qty}
-                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b3b00,#555500)",border:"1px solid #ffeb3b",borderRadius:4,
-                            color:"#ffeb3b",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                          ➕ ADD
-                        </button>
-                      </div>
-                      {addInputs[t.id]?.price&&addInputs[t.id]?.qty&&(()=>{
-                        const newQty = parseFloat(t.qty)+parseFloat(addInputs[t.id].qty);
-                        const newAvg = ((parseFloat(t.entry)*parseFloat(t.qty))+(parseFloat(addInputs[t.id].price)*parseFloat(addInputs[t.id].qty)))/newQty;
-                        return <div style={{marginTop:6,fontSize:9,color:"#ffeb3b"}}>
-                          New avg: <strong>${newAvg.toFixed(2)}</strong> · Total qty: <strong>{newQty}</strong>
-                        </div>;
-                      })()}
-                    </div>
-                  )}
-
-                  {/* PARTIAL CLOSE */}
-                  {posAction[t.id]==="partial"&&(
-                    <div>
-                      <div style={{fontSize:9,color:"#ff9800",fontWeight:700,marginBottom:6}}>PARTIAL SELL · Holding {t.qty} shares</div>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <input placeholder="Exit price" value={partialInputs[t.id]?.price ?? (closingPrices[t.id]||"")}
-                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:e.target.value}}))}
-                          style={{flex:1,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>{ fetchClosePrice(t.id,t.symbol); setPartialInputs(p=>({...p,[t.id]:{...p[t.id],price:closingPrices[t.id]||""}})); }}
-                          style={{padding:"8px 10px",background:"#0d3b5e",border:"1px solid #00b4d8",borderRadius:4,color:"#00b4d8",fontSize:9,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                          {fetchingClose[t.id]?"⟳":"📡 LIVE"}
-                        </button>
-                        <input placeholder="Sell qty" value={partialInputs[t.id]?.qty||""}
-                          onChange={e=>setPartialInputs(p=>({...p,[t.id]:{...p[t.id],qty:e.target.value}}))}
-                          style={{width:60,background:"#0d1b2e",border:"1px solid #ff9800",borderRadius:4,color:"#ff9800",padding:"8px 8px",fontSize:13,fontFamily:"inherit",outline:"none",fontWeight:700}}/>
-                        <button onClick={()=>{ partialClose(t.id, partialInputs[t.id]?.price, partialInputs[t.id]?.qty); setPartialInputs(p=>({...p,[t.id]:{}})); setPosAction(p=>({...p,[t.id]:null})); }}
-                          disabled={!partialInputs[t.id]?.price||!partialInputs[t.id]?.qty}
-                          style={{padding:"8px 12px",background:"linear-gradient(135deg,#3b1500,#5a2500)",border:"1px solid #ff9800",borderRadius:4,
-                            color:"#ff9800",fontSize:11,fontFamily:"inherit",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                          ➖ SELL
-                        </button>
-                      </div>
-                      {partialInputs[t.id]?.price&&partialInputs[t.id]?.qty&&(()=>{
-                        const sellQty = parseFloat(partialInputs[t.id].qty);
-                        const remain = parseFloat(t.qty) - sellQty;
-                        const pnl = calcPnl(t.direction,t.type,t.entry,partialInputs[t.id].price,sellQty);
-                        const col = pnl>=0?"#00e676":"#ff1744";
-                        return <div style={{marginTop:6,fontSize:9,color:"#ff9800"}}>
-                          Selling {sellQty} shares · Remaining: <strong>{remain>=0?remain:"⚠️ OVER"}</strong>
-                          {remain>=0&&<span style={{color:col,fontWeight:700}}> · P&L: {pnl>=0?"+":""}${pnl.toFixed(2)}</span>}
-                        </div>;
-                      })()}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             );
@@ -1516,6 +1245,327 @@ function BondoFund() {
 }
 
 
+
+// ─── SPIKE SCANNER ────────────────────────────────────────────────────────────
+function SpikeScanner() {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const [minPrice, setMinPrice] = useState(5);
+  const [minVol, setMinVol] = useState(700000);
+  const [minPct, setMinPct] = useState(2);
+  const [minVolMult, setMinVolMult] = useState(2);
+  const [direction, setDirection] = useState("BOTH");
+  const [sortBy, setSortBy] = useState("pct");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const timerRef = useRef(null);
+
+  const scan = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=" + API_KEY + "&include_otc=false");
+      const data = await res.json();
+      const tickers = data.tickers || [];
+      const filtered = tickers.filter(t => {
+        const price = t.day && t.day.c || 0;
+        const avgVol = t.prevDay && t.prevDay.v || 1;
+        const pct = t.todaysChangePerc || 0;
+        const volMult = (t.day && t.day.v || 0) / avgVol;
+        if (price < minPrice || avgVol < minVol || Math.abs(pct) < minPct || volMult < minVolMult) return false;
+        if (direction === "UP" && pct <= 0) return false;
+        if (direction === "DOWN" && pct >= 0) return false;
+        return true;
+      }).map(t => ({
+        symbol: t.ticker,
+        price: t.day && t.day.c || 0,
+        pct: t.todaysChangePerc || 0,
+        vol: t.day && t.day.v || 0,
+        avgVol: t.prevDay && t.prevDay.v || 0,
+        volMult: (t.day && t.day.v || 0) / (t.prevDay && t.prevDay.v || 1),
+        high: t.day && t.day.h || 0,
+        low: t.day && t.day.l || 0,
+      }));
+      filtered.sort((a, b) => sortBy === "pct" ? Math.abs(b.pct) - Math.abs(a.pct) : sortBy === "vol" ? b.volMult - a.volMult : b.price - a.price);
+      setResults(filtered.slice(0, 100));
+      setLastScan(new Date().toLocaleTimeString());
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (autoRefresh) { timerRef.current = setInterval(scan, 60000); }
+    else { clearInterval(timerRef.current); }
+    return () => clearInterval(timerRef.current);
+  }, [autoRefresh, minPrice, minVol, minPct, minVolMult, direction, sortBy]);
+
+  const fmt = n => n >= 1000000 ? (n/1000000).toFixed(1) + "M" : n >= 1000 ? (n/1000).toFixed(0) + "K" : String(n);
+
+  return (
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
+      <div style={{maxWidth:900,margin:"0 auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
+            <div style={{fontSize:16,fontWeight:700}}>&#9889; Spike Scanner</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {lastScan && <span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
+            <button onClick={() => setAutoRefresh(a => !a)} style={{padding:"5px 10px",background:autoRefresh?"#00e67622":"#0d1e30",border:"1px solid " + (autoRefresh?"#00e676":"#1e3a5a"),borderRadius:5,color:autoRefresh?"#00e676":"#3a6e9a",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>{autoRefresh ? "PAUSE" : "AUTO OFF"}</button>
+            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading ? "SCANNING..." : "SCAN NOW"}</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Price $</div>
+            <input type="number" value={minPrice} min={1} max={500} step={1} onChange={e => setMinPrice(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Avg Vol</div>
+            <input type="number" value={minVol} min={100000} max={5000000} step={100000} onChange={e => setMinVol(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min % Move</div>
+            <input type="number" value={minPct} min={0.5} max={20} step={0.5} onChange={e => setMinPct(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Vol Mult</div>
+            <input type="number" value={minVolMult} min={1} max={10} step={0.5} onChange={e => setMinVolMult(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>DIRECTION</div>
+            <select value={direction} onChange={e => setDirection(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="BOTH">Both</option>
+              <option value="UP">Up only</option>
+              <option value="DOWN">Down only</option>
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>SORT BY</div>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="pct">% Move</option>
+              <option value="vol">Vol Mult</option>
+              <option value="price">Price</option>
+            </select>
+          </div>
+        </div>
+        {results.length > 0 && (
+          <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+            {[["SPIKES", results.length, "#e8f4ff"], ["UP", results.filter(r => r.pct > 0).length, "#00e676"], ["DOWN", results.filter(r => r.pct < 0).length, "#ff5252"], ["AVG", (results.reduce((s,r) => s + Math.abs(r.pct), 0) / results.length).toFixed(1) + "%", "#f59e0b"]].map(([l,v,c]) => (
+              <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+                <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+                <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {loading && <div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>Scanning entire US market...</div>}
+        {!loading && results.length === 0 && lastScan && <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No spikes matched. Try lowering filters.</div>}
+        {!loading && !lastScan && <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>Press SCAN NOW to find spikes across Russell 3000+</div>}
+        {results.length > 0 && (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #1e3a5a"}}>
+                  {["SYMBOL","PRICE","% MOVE","VOLUME","VOL MULT","HIGH","LOW"].map(h => (
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => {
+                  const up = r.pct >= 0;
+                  return (
+                    <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={() => window.open("https://finance.yahoo.com/quote/" + r.symbol, "_blank")}>
+                      <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
+                      <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:"1px solid " + (up?"#00e67644":"#ff525244"),borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up ? "+" : ""}{r.pct.toFixed(2)}%</span>
+                      </td>
+                      <td style={{padding:"7px 8px"}}>{fmt(r.vol)}</td>
+                      <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
+                      <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.high.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.low.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── GAP SCANNER ──────────────────────────────────────────────────────────────
+function GapScanner() {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const [minVol, setMinVol] = useState(700000);
+  const [minPrice, setMinPrice] = useState(5);
+  const [overrideGap, setOverrideGap] = useState(0);
+  const [direction, setDirection] = useState("BOTH");
+  const [sortBy, setSortBy] = useState("gap");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const timerRef = useRef(null);
+
+  const getDynMin = price => price >= 500 ? 1.0 : price >= 100 ? 1.5 : price >= 20 ? 2.0 : 3.0;
+
+  const scan = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=" + API_KEY + "&include_otc=false");
+      const data = await res.json();
+      const tickers = data.tickers || [];
+      const filtered = tickers.filter(t => {
+        const prevClose = t.prevDay && t.prevDay.c || 0;
+        const open = t.day && t.day.o || 0;
+        const price = t.day && t.day.c || open;
+        const avgVol = t.prevDay && t.prevDay.v || 1;
+        if (!prevClose || !open || price < minPrice || avgVol < minVol) return false;
+        const gapPct = ((open - prevClose) / prevClose) * 100;
+        const minGap = overrideGap > 0 ? overrideGap : getDynMin(price);
+        if (Math.abs(gapPct) < minGap) return false;
+        if (direction === "UP" && gapPct <= 0) return false;
+        if (direction === "DOWN" && gapPct >= 0) return false;
+        return true;
+      }).map(t => {
+        const prevClose = t.prevDay && t.prevDay.c || 0;
+        const open = t.day && t.day.o || 0;
+        const price = t.day && t.day.c || open;
+        const gapPct = ((open - prevClose) / prevClose) * 100;
+        const filling = gapPct > 0 ? price < open : price > open;
+        const extending = gapPct > 0 ? price > open : price < open;
+        return {
+          symbol: t.ticker, price, open, prevClose, gapPct,
+          gapAmt: open - prevClose,
+          vol: t.day && t.day.v || 0,
+          avgVol: t.prevDay && t.prevDay.v || 0,
+          volMult: (t.day && t.day.v || 0) / (t.prevDay && t.prevDay.v || 1),
+          filling, extending,
+          high: t.day && t.day.h || 0,
+          low: t.day && t.day.l || 0,
+        };
+      });
+      filtered.sort((a, b) => sortBy === "gap" ? Math.abs(b.gapPct) - Math.abs(a.gapPct) : sortBy === "vol" ? b.volMult - a.volMult : b.price - a.price);
+      setResults(filtered.slice(0, 100));
+      setLastScan(new Date().toLocaleTimeString());
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (autoRefresh) { timerRef.current = setInterval(scan, 60000); }
+    else { clearInterval(timerRef.current); }
+    return () => clearInterval(timerRef.current);
+  }, [autoRefresh, minPrice, minVol, overrideGap, direction, sortBy]);
+
+  return (
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
+      <div style={{maxWidth:950,margin:"0 auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
+            <div style={{fontSize:16,fontWeight:700}}>&#127749; Gap Scanner</div>
+            <div style={{fontSize:10,color:"#3a6e9a"}}>Dynamic gap % by price range</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {lastScan && <span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
+            <button onClick={() => setAutoRefresh(a => !a)} style={{padding:"5px 10px",background:autoRefresh?"#00e67622":"#0d1e30",border:"1px solid " + (autoRefresh?"#00e676":"#1e3a5a"),borderRadius:5,color:autoRefresh?"#00e676":"#3a6e9a",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>{autoRefresh ? "PAUSE" : "AUTO OFF"}</button>
+            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading ? "SCANNING..." : "SCAN GAPS"}</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+          {[["$5-$20","3%+","#e040fb"],["$20-$100","2%+","#f59e0b"],["$100-$500","1.5%+","#38bdf8"],["$500+","1%+","#00e676"]].map(([range,pct,color]) => (
+            <div key={range} style={{background:"#0d1e30",border:"1px solid " + color + "44",borderRadius:5,padding:"4px 10px",fontSize:10}}>
+              <span style={{color:"#3a6e9a"}}>{range} </span>
+              <span style={{color,fontWeight:700}}>{pct}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Price $</div>
+            <input type="number" value={minPrice} min={1} max={500} step={1} onChange={e => setMinPrice(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Avg Vol</div>
+            <input type="number" value={minVol} min={100000} max={5000000} step={100000} onChange={e => setMinVol(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Override Gap %</div>
+            <input type="number" value={overrideGap} min={0} max={20} step={0.5} onChange={e => setOverrideGap(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>DIRECTION</div>
+            <select value={direction} onChange={e => setDirection(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="BOTH">Both</option>
+              <option value="UP">Gap Up</option>
+              <option value="DOWN">Gap Down</option>
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>SORT BY</div>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
+              <option value="gap">Gap %</option>
+              <option value="vol">Vol Mult</option>
+              <option value="price">Price</option>
+            </select>
+          </div>
+        </div>
+        {results.length > 0 && (
+          <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+            {[["GAPS", results.length, "#e8f4ff"], ["UP", results.filter(r => r.gapPct > 0).length, "#00e676"], ["DOWN", results.filter(r => r.gapPct < 0).length, "#ff5252"], ["FILLING", results.filter(r => r.filling).length, "#f59e0b"], ["EXTENDING", results.filter(r => r.extending).length, "#38bdf8"]].map(([l,v,c]) => (
+              <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+                <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+                <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {loading && <div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>Scanning for gaps...</div>}
+        {!loading && results.length === 0 && lastScan && <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No gaps matched. Try lowering filters.</div>}
+        {!loading && !lastScan && <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>Press SCAN GAPS — best used at 9:30-9:45 AM</div>}
+        {results.length > 0 && (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #1e3a5a"}}>
+                  {["SYMBOL","PRICE","GAP %","GAP $","PREV CLOSE","OPEN","STATUS","VOL MULT"].map(h => (
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => {
+                  const up = r.gapPct >= 0;
+                  const status = r.filling ? "FILLING" : r.extending ? "EXTENDING" : "FLAT";
+                  const sc = r.filling ? "#f59e0b" : r.extending ? (up ? "#00e676" : "#ff5252") : "#3a6e9a";
+                  return (
+                    <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={() => window.open("https://finance.yahoo.com/quote/" + r.symbol, "_blank")}>
+                      <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
+                      <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:"1px solid " + (up?"#00e67644":"#ff525244"),borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up ? "+" : ""}{r.gapPct.toFixed(2)}%</span>
+                      </td>
+                      <td style={{padding:"7px 8px",color:up?"#00e676":"#ff5252"}}>{up ? "+" : ""}{r.gapAmt.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.prevClose.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px"}}>${r.open.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px",color:sc,fontWeight:700,fontSize:10}}>{status}</td>
+                      <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MARKET BREADTH ───────────────────────────────────────────────────────────
 function MarketBreadth() {
   const [data, setData] = useState(null);
@@ -1524,116 +1574,80 @@ function MarketBreadth() {
   const timerRef = useRef(null);
 
   const isMarketOpen = () => {
-    const now = new Date();
-    const et = new Date(now.toLocaleString("en-US", {timeZone:"America/New_York"}));
+    const et = new Date(new Date().toLocaleString("en-US", {timeZone:"America/New_York"}));
     const day = et.getDay();
-    const h = et.getHours(); const m = et.getMinutes();
-    const mins = h*60+m;
-    if (day===0||day===6) return false;
-    return mins >= 570 && mins < 960;
-  };
-
-  const fetch5min = async (sym) => {
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/5/minute/${today}/${today}?adjusted=true&sort=asc&limit=100&apiKey=${API_KEY}`;
-      const res = await fetch(url);
-      const d = await res.json();
-      return d.results || [];
-    } catch { return []; }
-  };
-
-  const fetchSnap = async (sym) => {
-    try {
-      const res = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${sym}?apiKey=${API_KEY}`);
-      const d = await res.json();
-      return d.ticker || null;
-    } catch { return null; }
+    const mins = et.getHours() * 60 + et.getMinutes();
+    return day >= 1 && day <= 5 && mins >= 570 && mins < 960;
   };
 
   const calcEMA = (closes, period) => {
     if (closes.length < period) return null;
-    const k = 2/(period+1);
-    let ema = closes.slice(0,period).reduce((a,b)=>a+b,0)/period;
-    for (let i=period; i<closes.length; i++) ema = closes[i]*k + ema*(1-k);
+    const k = 2 / (period + 1);
+    let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
     return ema;
   };
 
   const load = async () => {
     setLoading(true);
     try {
-      // Fetch SPY, QQQ, VIX snapshots
-      const [spy, qqq, vix] = await Promise.all([
-        fetchSnap("SPY"), fetchSnap("QQQ"), fetchSnap("VIX")
-      ]);
-
-      // Fetch SPY 5min candles for EMA
-      const spyCandles = await fetch5min("SPY");
-      const spyCloses = spyCandles.map(c=>c.c);
-      const spy9  = calcEMA(spyCloses, 9);
-      const spy20 = calcEMA(spyCloses, 20);
-      const spy50 = calcEMA(spyCloses, 50);
-      const spyPrice = spy?.day?.c || 0;
-
-      // Fetch breadth snapshot - sample large caps for A/D
-      const snapRes = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=${API_KEY}&include_otc=false`);
+      const fetchSnap = async sym => {
+        try {
+          const r = await fetch("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/" + sym + "?apiKey=" + API_KEY);
+          const d = await r.json();
+          return d.ticker || null;
+        } catch { return null; }
+      };
+      const [spy, qqq, vix] = await Promise.all([fetchSnap("SPY"), fetchSnap("QQQ"), fetchSnap("VIX")]);
+      const today = new Date().toISOString().split("T")[0];
+      let spy9 = null, spy20 = null, spy50 = null;
+      try {
+        const cr = await fetch("https://api.polygon.io/v2/aggs/ticker/SPY/range/5/minute/" + today + "/" + today + "?adjusted=true&sort=asc&limit=100&apiKey=" + API_KEY);
+        const cd = await cr.json();
+        const closes = (cd.results || []).map(c => c.c);
+        spy9 = calcEMA(closes, 9);
+        spy20 = calcEMA(closes, 20);
+        spy50 = calcEMA(closes, 50);
+      } catch {}
+      const snapRes = await fetch("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=" + API_KEY + "&include_otc=false");
       const snapData = await snapRes.json();
-      const tickers = snapData.tickers || [];
-
-      // Filter liquid stocks only (avg vol > 500k)
-      const liquid = tickers.filter(t => (t.prevDay?.v||0) > 500000);
-      const advancing = liquid.filter(t => (t.todaysChangePerc||0) > 0).length;
-      const declining = liquid.filter(t => (t.todaysChangePerc||0) < 0).length;
-      const unchanged = liquid.length - advancing - declining;
-      const adRatio = declining > 0 ? (advancing/declining).toFixed(2) : "∞";
-
-      // % above 50MA approximation using prevDay vs current
-      const above50 = liquid.filter(t => (t.day?.c||0) > (t.prevDay?.c||0)).length;
-      const pctAbove = liquid.length > 0 ? ((above50/liquid.length)*100).toFixed(1) : 0;
-
-      // New highs / new lows (52w)
-      const newHighs = liquid.filter(t => t.day?.c >= (t.day?.h||0) && (t.todaysChangePerc||0) > 1).length;
-      const newLows = liquid.filter(t => t.day?.c <= (t.day?.l||0) && (t.todaysChangePerc||0) < -1).length;
-
-      // SPY trend
+      const liquid = (snapData.tickers || []).filter(t => (t.prevDay && t.prevDay.v || 0) > 500000);
+      const advancing = liquid.filter(t => (t.todaysChangePerc || 0) > 0).length;
+      const declining = liquid.filter(t => (t.todaysChangePerc || 0) < 0).length;
+      const adRatio = declining > 0 ? (advancing / declining).toFixed(2) : "99";
+      const vixPrice = vix && vix.day && vix.day.c || vix && vix.prevDay && vix.prevDay.c || 0;
+      const spyPrice = spy && spy.day && spy.day.c || 0;
       let spyTrend = "NEUTRAL";
-      if (spy9 && spy20 && spy50) {
+      if (spy9 && spy20) {
         if (spyPrice > spy9 && spy9 > spy20) spyTrend = "STRONG BULL";
         else if (spyPrice > spy20) spyTrend = "BULL";
         else if (spyPrice < spy9 && spy9 < spy20) spyTrend = "STRONG BEAR";
         else if (spyPrice < spy20) spyTrend = "BEAR";
       }
-
-      // VIX reading
-      const vixPrice = vix?.day?.c || vix?.prevDay?.c || 0;
-      let vixState = vixPrice < 15 ? "LOW FEAR" : vixPrice < 20 ? "NORMAL" : vixPrice < 30 ? "ELEVATED" : "EXTREME FEAR";
-      let vixColor = vixPrice < 15 ? "#00e676" : vixPrice < 20 ? "#38bdf8" : vixPrice < 30 ? "#f59e0b" : "#ff5252";
-
-      // Market score 0-100
+      const vixColor = vixPrice < 15 ? "#00e676" : vixPrice < 20 ? "#38bdf8" : vixPrice < 30 ? "#f59e0b" : "#ff5252";
+      const vixState = vixPrice < 15 ? "LOW FEAR" : vixPrice < 20 ? "NORMAL" : vixPrice < 30 ? "ELEVATED" : "EXTREME FEAR";
       let score = 50;
       if (spyTrend === "STRONG BULL") score += 20;
       else if (spyTrend === "BULL") score += 10;
       else if (spyTrend === "BEAR") score -= 10;
       else if (spyTrend === "STRONG BEAR") score -= 20;
-      if (parseFloat(adRatio) > 2) score += 15;
-      else if (parseFloat(adRatio) > 1.5) score += 8;
-      else if (parseFloat(adRatio) < 0.7) score -= 15;
-      else if (parseFloat(adRatio) < 1) score -= 8;
+      const adNum = parseFloat(adRatio);
+      if (adNum > 2) score += 15;
+      else if (adNum > 1.5) score += 8;
+      else if (adNum < 0.7) score -= 15;
+      else if (adNum < 1) score -= 8;
       if (vixPrice < 15) score += 10;
       else if (vixPrice > 25) score -= 10;
       else if (vixPrice > 30) score -= 20;
       score = Math.max(0, Math.min(100, score));
-
-      let verdict = score >= 70 ? "SAFE TO TRADE 🟢" : score >= 50 ? "PROCEED WITH CAUTION 🟡" : "RISKY — STAY SMALL 🔴";
-      let verdictColor = score >= 70 ? "#00e676" : score >= 50 ? "#f59e0b" : "#ff5252";
-
+      const verdict = score >= 70 ? "SAFE TO TRADE" : score >= 50 ? "PROCEED WITH CAUTION" : "RISKY — STAY SMALL";
+      const verdictColor = score >= 70 ? "#00e676" : score >= 50 ? "#f59e0b" : "#ff5252";
       setData({
-        spy: { price: spyPrice, pct: spy?.todaysChangePerc||0, trend: spyTrend, ema9: spy9, ema20: spy20, ema50: spy50 },
-        qqq: { price: qqq?.day?.c||0, pct: qqq?.todaysChangePerc||0 },
-        vix: { price: vixPrice, state: vixState, color: vixColor },
-        breadth: { advancing, declining, unchanged, adRatio, pctAbove, newHighs, newLows, total: liquid.length },
-        score, verdict, verdictColor,
-        marketOpen: isMarketOpen(),
+        spy: {price:spyPrice, pct:spy&&spy.todaysChangePerc||0, trend:spyTrend, ema9:spy9, ema20:spy20, ema50:spy50},
+        qqq: {price:qqq&&qqq.day&&qqq.day.c||0, pct:qqq&&qqq.todaysChangePerc||0},
+        vix: {price:vixPrice, state:vixState, color:vixColor},
+        breadth: {advancing, declining, adRatio, total:liquid.length},
+        score, verdict, verdictColor, marketOpen:isMarketOpen(),
       });
       setLastUpdate(new Date().toLocaleTimeString());
     } catch(e) { console.error(e); }
@@ -1646,368 +1660,392 @@ function MarketBreadth() {
     return () => clearInterval(timerRef.current);
   }, []);
 
-  const trendColor = (t) => t==="STRONG BULL"?"#00e676":t==="BULL"?"#38bdf8":t==="BEAR"?"#f59e0b":t==="STRONG BEAR"?"#ff5252":"#3a6e9a";
+  const trendColor = t => t === "STRONG BULL" ? "#00e676" : t === "BULL" ? "#38bdf8" : t === "BEAR" ? "#f59e0b" : t === "STRONG BEAR" ? "#ff5252" : "#3a6e9a";
 
   return (
     <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"14px 12px"}}>
       <div style={{maxWidth:800,margin:"0 auto"}}>
-
-        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
           <div>
             <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
-            <div style={{fontSize:16,fontWeight:700}}>🌡️ Market Breadth</div>
-            <div style={{fontSize:10,color:"#3a6e9a"}}>Auto-refreshes every 2 min · {data?.marketOpen?"🟢 MARKET OPEN":"🔴 MARKET CLOSED"}</div>
+            <div style={{fontSize:16,fontWeight:700}}>&#127777;&#65039; Market Breadth</div>
+            <div style={{fontSize:10,color:"#3a6e9a"}}>Auto-refresh 2min · {data ? (data.marketOpen ? "MARKET OPEN" : "MARKET CLOSED") : "..."}</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {lastUpdate&&<span style={{fontSize:10,color:"#3a6e9a"}}>Updated: {lastUpdate}</span>}
-            <button onClick={load} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading?"LOADING...":"🔄 REFRESH"}</button>
+            {lastUpdate && <span style={{fontSize:10,color:"#3a6e9a"}}>Updated: {lastUpdate}</span>}
+            <button onClick={load} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading ? "LOADING..." : "REFRESH"}</button>
           </div>
         </div>
-
-        {loading&&!data&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>🌡️ Loading market data...</div>}
-
-        {data&&<>
-          {/* VERDICT */}
-          <div style={{background:"#0d1e30",border:`2px solid ${data.verdictColor}44`,borderRadius:10,padding:"16px 20px",marginBottom:16,textAlign:"center"}}>
-            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.15em",marginBottom:6}}>9:45 AM TRADE SIGNAL</div>
-            <div style={{fontSize:20,fontWeight:700,color:data.verdictColor}}>{data.verdict}</div>
-            <div style={{marginTop:10,height:8,background:"#1e3a5a",borderRadius:4}}>
-              <div style={{height:"100%",width:`${data.score}%`,background:data.score>=70?"#00e676":data.score>=50?"#f59e0b":"#ff5252",borderRadius:4,transition:"width 1s"}}/>
-            </div>
-            <div style={{fontSize:10,color:"#3a6e9a",marginTop:4}}>Market Score: {data.score}/100</div>
-          </div>
-
-          {/* SPY + QQQ + VIX */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-            {[
-              ["SPY",data.spy.price,data.spy.pct,"#38bdf8",data.spy.trend,trendColor(data.spy.trend)],
-              ["QQQ",data.qqq.price,data.qqq.pct,"#e040fb",null,null],
-              ["VIX",data.vix.price,null,data.vix.color,data.vix.state,data.vix.color],
-            ].map(([sym,price,pct,color,label,labelColor])=>(
-              <div key={sym} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
-                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>{sym}</div>
-                <div style={{fontSize:18,fontWeight:700,color}}>${price.toFixed(2)}</div>
-                {pct!==null&&<div style={{fontSize:11,color:pct>=0?"#00e676":"#ff5252",marginTop:2}}>{pct>=0?"+":""}{pct.toFixed(2)}%</div>}
-                {label&&<div style={{fontSize:10,color:labelColor,fontWeight:700,marginTop:4}}>{label}</div>}
+        {loading && !data && <div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>Loading market data...</div>}
+        {data && (
+          <div>
+            <div style={{background:"#0d1e30",border:"2px solid " + data.verdictColor + "44",borderRadius:10,padding:"16px 20px",marginBottom:16,textAlign:"center"}}>
+              <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.15em",marginBottom:6}}>9:45 AM TRADE SIGNAL</div>
+              <div style={{fontSize:20,fontWeight:700,color:data.verdictColor}}>{data.verdict}</div>
+              <div style={{marginTop:10,height:8,background:"#1e3a5a",borderRadius:4}}>
+                <div style={{height:"100%",width:data.score + "%",background:data.verdictColor,borderRadius:4}}/>
               </div>
-            ))}
-          </div>
-
-          {/* SPY EMAs */}
-          {data.spy.ema9&&<div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>SPY EMA LEVELS (5min)</div>
-            <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-              {[["EMA 9",data.spy.ema9,"#00e676"],["EMA 20",data.spy.ema20,"#38bdf8"],["EMA 50",data.spy.ema50,"#f59e0b"]].map(([l,v,c])=>(
-                <div key={l}>
-                  <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>{l}</div>
-                  <div style={{fontSize:13,fontWeight:700,color:c}}>${v?v.toFixed(2):"—"}</div>
-                  <div style={{fontSize:9,color:data.spy.price>v?"#00e676":"#ff5252"}}>{data.spy.price>v?"▲ ABOVE":"▼ BELOW"}</div>
+              <div style={{fontSize:10,color:"#3a6e9a",marginTop:4}}>Market Score: {data.score}/100</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+              <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>SPY</div>
+                <div style={{fontSize:18,fontWeight:700,color:"#38bdf8"}}>${data.spy.price.toFixed(2)}</div>
+                <div style={{fontSize:11,color:data.spy.pct>=0?"#00e676":"#ff5252",marginTop:2}}>{data.spy.pct>=0?"+":""}{data.spy.pct.toFixed(2)}%</div>
+                <div style={{fontSize:10,color:trendColor(data.spy.trend),fontWeight:700,marginTop:4}}>{data.spy.trend}</div>
+              </div>
+              <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>QQQ</div>
+                <div style={{fontSize:18,fontWeight:700,color:"#e040fb"}}>${data.qqq.price.toFixed(2)}</div>
+                <div style={{fontSize:11,color:data.qqq.pct>=0?"#00e676":"#ff5252",marginTop:2}}>{data.qqq.pct>=0?"+":""}{data.qqq.pct.toFixed(2)}%</div>
+              </div>
+              <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>VIX</div>
+                <div style={{fontSize:18,fontWeight:700,color:data.vix.color}}>{data.vix.price.toFixed(2)}</div>
+                <div style={{fontSize:10,color:data.vix.color,fontWeight:700,marginTop:4}}>{data.vix.state}</div>
+              </div>
+            </div>
+            {data.spy.ema9 && (
+              <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>SPY EMA LEVELS (5min)</div>
+                <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                  {[["EMA 9", data.spy.ema9, "#00e676"], ["EMA 20", data.spy.ema20, "#38bdf8"], ["EMA 50", data.spy.ema50, "#f59e0b"]].map(([l, v, c]) => (
+                    <div key={l}>
+                      <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>{l}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:c}}>${v ? v.toFixed(2) : "—"}</div>
+                      <div style={{fontSize:9,color:data.spy.price > v ? "#00e676" : "#ff5252"}}>{data.spy.price > v ? "ABOVE" : "BELOW"}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              <div>
-                <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>TREND</div>
-                <div style={{fontSize:13,fontWeight:700,color:trendColor(data.spy.trend)}}>{data.spy.trend}</div>
+              </div>
+            )}
+            <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+              <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>MARKET BREADTH ({data.breadth.total.toLocaleString()} liquid stocks)</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                {[["ADVANCING", data.breadth.advancing, "#00e676"], ["DECLINING", data.breadth.declining, "#ff5252"], ["A/D RATIO", data.breadth.adRatio, parseFloat(data.breadth.adRatio) > 1.5 ? "#00e676" : parseFloat(data.breadth.adRatio) < 0.7 ? "#ff5252" : "#f59e0b"]].map(([l, v, c]) => (
+                  <div key={l} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"8px 10px"}}>
+                    <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2}}>{l}</div>
+                    <div style={{fontSize:15,fontWeight:700,color:c}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:12}}>
+                <div style={{height:6,background:"#ff525244",borderRadius:3}}>
+                  <div style={{height:"100%",width:((data.breadth.advancing / (data.breadth.advancing + data.breadth.declining) || 0) * 100) + "%",background:"#00e676",borderRadius:3}}/>
+                </div>
               </div>
             </div>
-          </div>}
-
-          {/* Breadth */}
-          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>MARKET BREADTH ({data.breadth.total.toLocaleString()} liquid stocks)</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
+            <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+              <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>9:45 AM CHECKLIST</div>
               {[
-                ["ADVANCING",data.breadth.advancing,"#00e676"],
-                ["DECLINING",data.breadth.declining,"#ff5252"],
-                ["UNCHANGED",data.breadth.unchanged,"#3a6e9a"],
-                ["A/D RATIO",data.breadth.adRatio,parseFloat(data.breadth.adRatio)>1.5?"#00e676":parseFloat(data.breadth.adRatio)<0.7?"#ff5252":"#f59e0b"],
-                ["NEW HIGHS",data.breadth.newHighs,"#00e676"],
-                ["NEW LOWS",data.breadth.newLows,"#ff5252"],
-              ].map(([l,v,c])=>(
-                <div key={l} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"8px 10px"}}>
-                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2}}>{l}</div>
-                  <div style={{fontSize:15,fontWeight:700,color:c}}>{v}</div>
+                ["SPY above EMA 9", data.spy.price > (data.spy.ema9 || 0)],
+                ["SPY above EMA 20", data.spy.price > (data.spy.ema20 || 0)],
+                ["VIX below 25", data.vix.price < 25],
+                ["More stocks advancing", data.breadth.advancing > data.breadth.declining],
+                ["A/D Ratio above 1.5", parseFloat(data.breadth.adRatio) > 1.5],
+                ["Market is open", data.marketOpen],
+              ].map(([label, pass]) => (
+                <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:"1px solid #0d2030"}}>
+                  <span style={{fontSize:14}}>{pass ? "✅" : "❌"}</span>
+                  <span style={{fontSize:12,color:pass?"#e8f4ff":"#3a6e9a"}}>{label}</span>
                 </div>
               ))}
             </div>
-            {/* A/D Bar */}
-            <div style={{marginTop:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#3a6e9a",marginBottom:3}}>
-                <span>ADVANCING {((data.breadth.advancing/(data.breadth.advancing+data.breadth.declining))*100||0).toFixed(0)}%</span>
-                <span>DECLINING {((data.breadth.declining/(data.breadth.advancing+data.breadth.declining))*100||0).toFixed(0)}%</span>
-              </div>
-              <div style={{height:6,background:"#ff525244",borderRadius:3}}>
-                <div style={{height:"100%",width:`${(data.breadth.advancing/(data.breadth.advancing+data.breadth.declining))*100||0}%`,background:"#00e676",borderRadius:3}}/>
-              </div>
-            </div>
           </div>
-
-          {/* Trade Checklist */}
-          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
-            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>9:45 AM CHECKLIST</div>
-            {[
-              ["SPY above EMA 9", data.spy.price > (data.spy.ema9||0)],
-              ["SPY above EMA 20", data.spy.price > (data.spy.ema20||0)],
-              ["VIX below 25", data.vix.price < 25],
-              ["More stocks advancing than declining", data.breadth.advancing > data.breadth.declining],
-              ["A/D Ratio above 1.5", parseFloat(data.breadth.adRatio) > 1.5],
-              ["Market is open", data.marketOpen],
-            ].map(([label, pass])=>(
-              <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:"1px solid #0d2030"}}>
-                <span style={{fontSize:14}}>{pass?"✅":"❌"}</span>
-                <span style={{fontSize:12,color:pass?"#e8f4ff":"#3a6e9a"}}>{label}</span>
-              </div>
-            ))}
-          </div>
-        </>}
+        )}
       </div>
     </div>
   );
 }
 
-
-// ─── CHART PATTERN ANALYZER ───────────────────────────────────────────────────
-function ChartPatternAnalyzer() {
-  const [image, setImage] = useState(null);
-  const [imageData, setImageData] = useState(null);
+// ─── PRE-MARKET & HOD/LOD ─────────────────────────────────────────────────────
+function PreMarketHODLOD() {
+  const [tab, setTab] = useState("premarket");
+  const [preResults, setPreResults] = useState([]);
+  const [hodResults, setHodResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const fileRef = useRef();
+  const [lastScan, setLastScan] = useState(null);
+  const [minPrice, setMinPrice] = useState(5);
+  const [minVol, setMinVol] = useState(500000);
+  const [minPct, setMinPct] = useState(2);
+  const timerRef = useRef(null);
 
-  const processFile = (file) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    const url = URL.createObjectURL(file);
-    setImage(url);
-    setResult(null);
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result.split(",")[1];
-      setImageData({ base64, type: file.type });
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    processFile(e.dataTransfer.files[0]);
+  const scan = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=" + API_KEY + "&include_otc=false");
+      const data = await res.json();
+      const tickers = data.tickers || [];
+      const liquid = tickers.filter(t => (t.prevDay && t.prevDay.v || 0) > minVol && (t.day && t.day.c || 0) > minPrice);
+      const pre = liquid
+        .filter(t => Math.abs(t.todaysChangePerc || 0) >= minPct)
+        .map(t => ({
+          symbol: t.ticker,
+          price: t.day && t.day.c || 0,
+          pct: t.todaysChangePerc || 0,
+          vol: t.day && t.day.v || 0,
+          avgVol: t.prevDay && t.prevDay.v || 0,
+          volMult: (t.day && t.day.v || 0) / (t.prevDay && t.prevDay.v || 1),
+          prevClose: t.prevDay && t.prevDay.c || 0,
+          high: t.day && t.day.h || 0,
+          low: t.day && t.day.l || 0,
+        }))
+        .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+        .slice(0, 50);
+      const hod = liquid
+        .map(t => ({
+          symbol: t.ticker,
+          price: t.day && t.day.c || 0,
+          high: t.day && t.day.h || 0,
+          low: t.day && t.day.l || 0,
+          pct: t.todaysChangePerc || 0,
+          vol: t.day && t.day.v || 0,
+          volMult: (t.day && t.day.v || 0) / (t.prevDay && t.prevDay.v || 1),
+          atHOD: t.day && t.day.c > 0 && t.day.h > 0 && Math.abs((t.day.c - t.day.h) / t.day.h) < 0.005,
+          atLOD: t.day && t.day.c > 0 && t.day.l > 0 && Math.abs((t.day.c - t.day.l) / t.day.l) < 0.005,
+        }))
+        .filter(t => t.atHOD || t.atLOD)
+        .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+        .slice(0, 50);
+      setPreResults(pre);
+      setHodResults(hod);
+      setLastScan(new Date().toLocaleTimeString());
+    } catch(e) { console.error(e); }
+    setLoading(false);
   };
 
   useEffect(() => {
-    const handler = (e) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (const item of items) {
-        if (item.type.startsWith("image/")) { processFile(item.getAsFile()); break; }
-      }
+    scan();
+    timerRef.current = setInterval(scan, 60000);
+    return () => clearInterval(timerRef.current);
+  }, []);
+
+  const fmt = n => n >= 1000000 ? (n/1000000).toFixed(1) + "M" : n >= 1000 ? (n/1000).toFixed(0) + "K" : String(n);
+  const results = tab === "premarket" ? preResults : hodResults;
+
+  return (
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
+      <div style={{maxWidth:900,margin:"0 auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
+            <div style={{fontSize:16,fontWeight:700}}>{tab === "premarket" ? "Pre-Market Movers" : "HOD / LOD Tracker"}</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {lastScan && <span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
+            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading ? "SCANNING..." : "REFRESH"}</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:4,marginBottom:12,background:"#0d1e30",borderRadius:6,padding:4}}>
+          {[["premarket", "Pre-Market", "#e040fb"], ["hodlod", "HOD / LOD", "#f59e0b"]].map(([id, label, color]) => (
+            <button key={id} onClick={() => setTab(id)} style={{flex:1,padding:"7px 0",background:tab===id?"#080e1a":"transparent",border:tab===id?"1px solid " + color + "44":"1px solid transparent",borderRadius:4,color:tab===id?color:"#3a6e9a",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{label}</button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Price $</div>
+            <input type="number" value={minPrice} min={1} max={500} step={1} onChange={e => setMinPrice(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min Avg Vol</div>
+            <input type="number" value={minVol} min={100000} max={5000000} step={100000} onChange={e => setMinVol(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>Min % Move</div>
+            <input type="number" value={minPct} min={0.5} max={20} step={0.5} onChange={e => setMinPct(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
+          </div>
+        </div>
+        {results.length > 0 && (
+          <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+            {tab === "premarket" ? (
+              [["MOVERS", preResults.length, "#e8f4ff"], ["UP", preResults.filter(r => r.pct > 0).length, "#00e676"], ["DOWN", preResults.filter(r => r.pct < 0).length, "#ff5252"]].map(([l,v,c]) => (
+                <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+                </div>
+              ))
+            ) : (
+              [["AT HOD/LOD", hodResults.length, "#e8f4ff"], ["AT HOD", hodResults.filter(r => r.atHOD).length, "#00e676"], ["AT LOD", hodResults.filter(r => r.atLOD).length, "#ff5252"]].map(([l,v,c]) => (
+                <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {loading && <div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>Scanning...</div>}
+        {!loading && results.length === 0 && <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No results found. Try lowering filters.</div>}
+        {tab === "premarket" && results.length > 0 && (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #1e3a5a"}}>
+                  {["SYMBOL","PRICE","% MOVE","VOLUME","VOL MULT","PREV CLOSE"].map(h => (
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => {
+                  const up = r.pct >= 0;
+                  return (
+                    <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={() => window.open("https://finance.yahoo.com/quote/" + r.symbol, "_blank")}>
+                      <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
+                      <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:"1px solid " + (up?"#00e67644":"#ff525244"),borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up ? "+" : ""}{r.pct.toFixed(2)}%</span>
+                      </td>
+                      <td style={{padding:"7px 8px"}}>{fmt(r.vol)}</td>
+                      <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
+                      <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.prevClose.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {tab === "hodlod" && results.length > 0 && (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #1e3a5a"}}>
+                  {["SYMBOL","PRICE","% TODAY","HIGH","LOW","STATUS","VOL MULT"].map(h => (
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => {
+                  const up = r.pct >= 0;
+                  const status = r.atHOD ? "AT HOD" : "AT LOD";
+                  const sc = r.atHOD ? "#00e676" : "#ff5252";
+                  return (
+                    <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={() => window.open("https://finance.yahoo.com/quote/" + r.symbol, "_blank")}>
+                      <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
+                      <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px"}}>
+                        <span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:"1px solid " + (up?"#00e67644":"#ff525244"),borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up ? "+" : ""}{r.pct.toFixed(2)}%</span>
+                      </td>
+                      <td style={{padding:"7px 8px",color:"#00e676"}}>${r.high.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px",color:"#ff5252"}}>${r.low.toFixed(2)}</td>
+                      <td style={{padding:"7px 8px",color:sc,fontWeight:700,fontSize:10}}>{status}</td>
+                      <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── PATTERN AI ───────────────────────────────────────────────────────────────
+function ChartPatternAnalyzer() {
+  const [img, setImg] = useState(null);
+  const [b64, setB64] = useState(null);
+  const [mime, setMime] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState("");
+  const [err, setErr] = useState("");
+  const ref = useRef();
+
+  const load = file => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setImg(URL.createObjectURL(file)); setResult(""); setErr(""); setMime(file.type);
+    const r = new FileReader();
+    r.onload = e => setB64(e.target.result.split(",")[1]);
+    r.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    const fn = e => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (items) for (const x of items) if (x.type.startsWith("image/")) { load(x.getAsFile()); break; }
     };
-    window.addEventListener("paste", handler);
-    return () => window.removeEventListener("paste", handler);
+    window.addEventListener("paste", fn);
+    return () => window.removeEventListener("paste", fn);
   }, []);
 
   const analyze = async () => {
-    if (!imageData) return;
-    setLoading(true); setResult(null); setError(null);
+    if (!b64) return;
+    setLoading(true); setResult(""); setErr("");
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-calls": "true"
-        },
+        headers: {"Content-Type":"application/json"},
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are an expert technical analysis assistant embedded in the ATM Machine trading scanner — Alo's proprietary system combining SHA + HalfTrend signals.
-Analyze the uploaded stock chart image and respond ONLY in this exact structured format — no preamble, no markdown:
-
-Pattern: [chart pattern name, e.g. Bull Flag, Head & Shoulders, Double Bottom, Ascending Triangle, Wedge, etc.]
-Signal: [Bullish / Bearish / Neutral]
-Bias: [Bullish / Bearish / Neutral]
-Entry Zone: [price level or zone if visible, else "See chart"]
-Target: [price target if estimable, else "See chart"]
-Stop Loss: [stop level if estimable, else "See chart"]
-Confidence: [0-100 number only]
-Notes: [2-3 sentences of sharp, actionable insight. Mention key levels, volume if visible, and whether this aligns with a momentum or reversal setup.]
-
-If no clear pattern is visible, say Pattern: No clear pattern and explain in Notes.`,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: imageData.type, data: imageData.base64 } },
-              { type: "text", text: "Analyze this stock chart and identify the pattern." }
-            ]
-          }]
+          max_tokens: 800,
+          system: "You are a professional technical analyst. Analyze the stock chart and reply in exactly this format:\nPattern: [name]\nSignal: [Bullish/Bearish/Neutral]\nEntry: [level or See chart]\nTarget: [level or See chart]\nStop: [level or See chart]\nConfidence: [0-100]\nNotes: [2-3 sentences]",
+          messages: [{role:"user",content:[
+            {type:"image",source:{type:"base64",media_type:mime,data:b64}},
+            {type:"text",text:"Analyze this chart."}
+          ]}]
         })
       });
-      const data = await response.json();
-      if (data.error) { setError("API: " + data.error.message); return; }
-      const text = data.content?.map(b => b.text || "").join("").trim();
-      if (text) setResult(text);
-      else setError("No analysis returned. Try a cleaner chart image.");
-    } catch(e) {
-      setError("Error: " + e.message);
-    } finally {
-      setLoading(false);
-    }
+      const d = await res.json();
+      if (d.error) { setErr("API Error: " + d.error.message); }
+      else {
+        const t = (d.content || []).map(x => x.text || "").join("").trim();
+        if (t) setResult(t); else setErr("No response.");
+      }
+    } catch(e) { setErr("Error: " + e.message); }
+    setLoading(false);
   };
 
-  const get = (key) => {
-    if (!result) return null;
-    const line = result.split("\n").find(l => l.toLowerCase().startsWith(key.toLowerCase()));
-    return line ? line.replace(/^[^:]+:\s*/i, "").trim() : null;
+  const g = k => {
+    if (!result) return "—";
+    const l = result.split("\n").find(x => x.toLowerCase().startsWith(k.toLowerCase()));
+    return l ? l.replace(/^[^:]+:\s*/, "") : "—";
   };
-
-  const pattern = get("Pattern");
-  const signal = get("Signal");
-  const bias = get("Bias");
-  const entry = get("Entry Zone");
-  const target = get("Target");
-  const stop = get("Stop Loss");
-  const confidence = get("Confidence");
-  const notes = get("Notes");
-  const confNum = confidence ? parseInt(confidence) : null;
-  const signalColor = signal?.toLowerCase().includes("bull") ? "#00e676" : signal?.toLowerCase().includes("bear") ? "#ff5252" : "#38bdf8";
 
   return (
-    <div style={{flex:1,overflowY:"auto",padding:"16px",background:"#080e1a",fontFamily:"monospace"}}>
-      <div style={{maxWidth:700,margin:"0 auto"}}>
-
-        {/* Header */}
-        <div style={{marginBottom:16}}>
-          <div style={{fontSize:11,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>ATM MACHINE v6.0 · AI MODULE</div>
-          <div style={{fontSize:18,fontWeight:700,color:"#e8f4ff",letterSpacing:"-0.01em"}}>📊 Chart Pattern Analyzer</div>
-          <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>Upload, drag, or Ctrl+V paste a chart → AI identifies the pattern</div>
+    <div style={{flex:1,overflowY:"auto",padding:16,background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace"}}>
+      <div style={{maxWidth:680,margin:"0 auto"}}>
+        <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>ATM MACHINE v6.0</div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>Pattern AI</div>
+        <div style={{fontSize:11,color:"#3a6e9a",marginBottom:14}}>Upload or Ctrl+V paste a TradingView screenshot</div>
+        <div onClick={() => ref.current.click()} style={{border:"2px dashed #1e3a5a",borderRadius:8,padding:"22px 16px",textAlign:"center",cursor:"pointer",background:"#0d1e30",marginBottom:10}}>
+          <div style={{fontSize:22}}>&#128200;</div>
+          <div style={{fontSize:13,fontWeight:600,margin:"6px 0 2px"}}>Click to upload or Ctrl+V paste</div>
+          <div style={{fontSize:11,color:"#3a6e9a"}}>JPG · PNG · WEBP</div>
+          <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={e => load(e.target.files[0])}/>
         </div>
-
-        {/* Drop Zone */}
-        <div
-          onClick={() => fileRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-          style={{
-            border:`2px dashed ${dragging?"#00e676":"#1e3a5a"}`,
-            borderRadius:8, padding:"28px 16px", textAlign:"center",
-            cursor:"pointer", background:dragging?"#00e67608":"#0d1e30",
-            transition:"all 0.2s", marginBottom:12
-          }}
-        >
-          <div style={{fontSize:28,marginBottom:8}}>📈</div>
-          <div style={{color:"#e8f4ff",fontSize:13,fontWeight:600,marginBottom:4}}>Drop chart here, click to browse, or Ctrl+V to paste</div>
-          <div style={{color:"#3a6e9a",fontSize:11}}>JPG · PNG · WEBP — TradingView screenshots work perfectly</div>
-          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
-        </div>
-
-        {/* Preview */}
-        {image && (
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:6}}>CHART PREVIEW</div>
-            <div style={{border:"1px solid #1e3a5a",borderRadius:6,overflow:"hidden",position:"relative"}}>
-              <img src={image} alt="Chart" style={{width:"100%",display:"block",maxHeight:300,objectFit:"contain",background:"#000"}}/>
-              <button onClick={e=>{e.stopPropagation();setImage(null);setImageData(null);setResult(null);}}
-                style={{position:"absolute",top:6,right:6,background:"#00000099",border:"none",color:"#e8f4ff",borderRadius:4,padding:"3px 8px",cursor:"pointer",fontSize:11}}>
-                ✕
-              </button>
-            </div>
+        {img && (
+          <div style={{marginBottom:10,border:"1px solid #1e3a5a",borderRadius:6,overflow:"hidden"}}>
+            <img src={img} alt="chart" style={{width:"100%",maxHeight:260,objectFit:"contain",background:"#000",display:"block"}}/>
           </div>
         )}
-
-        {/* Analyze Button */}
-        {imageData && !loading && (
-          <button onClick={analyze} style={{
-            width:"100%",padding:"12px 0",
-            background:"linear-gradient(135deg,#00e67622,#00e67611)",
-            border:"1px solid #00e67666",borderRadius:6,
-            color:"#00e676",fontSize:12,fontWeight:700,letterSpacing:"0.1em",
-            cursor:"pointer",fontFamily:"monospace",marginBottom:4
-          }}>⚡ ANALYZE PATTERN</button>
+        {b64 && !loading && (
+          <button onClick={analyze} style={{width:"100%",padding:"11px 0",background:"#00e67611",border:"1px solid #00e67655",borderRadius:6,color:"#00e676",fontSize:12,fontWeight:700,letterSpacing:"0.1em",cursor:"pointer",fontFamily:"monospace",marginBottom:8}}>ANALYZE PATTERN</button>
         )}
-
-        {/* Loading */}
-        {loading && (
-          <div style={{textAlign:"center",padding:32}}>
-            <div style={{width:36,height:36,borderRadius:"50%",border:"3px solid #1e3a5a",borderTop:"3px solid #00e676",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>
-            <div style={{color:"#3a6e9a",fontSize:12,letterSpacing:"0.08em"}}>ANALYZING CHART...</div>
-            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div style={{background:"#ff525211",border:"1px solid #ff525244",borderRadius:6,padding:12,color:"#ff5252",fontSize:12,marginTop:8}}>{error}</div>
-        )}
-
-        {/* Result Card */}
+        {loading && <div style={{textAlign:"center",padding:24,color:"#3a6e9a",fontSize:12}}>Analyzing...</div>}
+        {err && <div style={{background:"#ff525211",border:"1px solid #ff525244",borderRadius:6,padding:12,color:"#ff5252",fontSize:12,marginBottom:8}}>{err}</div>}
         {result && (
-          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:18,marginTop:12}}>
-
-            {/* Pattern + Signal */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
-              <div>
-                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.12em",marginBottom:3}}>PATTERN DETECTED</div>
-                <div style={{fontSize:17,fontWeight:700,color:"#e8f4ff"}}>{pattern||"—"}</div>
-              </div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {signal&&<span style={{background:signalColor+"22",color:signalColor,border:`1px solid ${signalColor}44`,borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{signal}</span>}
-                {bias&&<span style={{background:"#f59e0b22",color:"#f59e0b",border:"1px solid #f59e0b44",borderRadius:4,padding:"2px 9px",fontSize:10,fontWeight:700,letterSpacing:"0.1em"}}>{bias}</span>}
-              </div>
+          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:16}}>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>PATTERN</div>
+              <div style={{fontSize:16,fontWeight:700}}>{g("Pattern")}</div>
             </div>
-
-            {/* Metrics */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
-              {[["ENTRY ZONE",entry,"#38bdf8"],["TARGET",target,"#00e676"],["STOP LOSS",stop,"#ff5252"]].map(([lbl,val,col])=>(
-                <div key={lbl} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 11px"}}>
-                  <div style={{fontSize:8,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:3}}>{lbl}</div>
-                  <div style={{color:val?col:"#3a6e9a",fontSize:12,fontWeight:600}}>{val||"N/A"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+              {[["ENTRY", g("Entry"), "#38bdf8"], ["TARGET", g("Target"), "#00e676"], ["STOP", g("Stop"), "#ff5252"]].map(([l,v,c]) => (
+                <div key={l} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"8px 10px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2}}>{l}</div>
+                  <div style={{color:c,fontSize:12,fontWeight:600}}>{v}</div>
                 </div>
               ))}
             </div>
-
-            {/* Confidence Bar */}
-            {confNum&&(
-              <div style={{marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em"}}>CONFIDENCE</span>
-                  <span style={{fontSize:11,fontWeight:700,color:"#f59e0b"}}>{confNum}%</span>
-                </div>
-                <div style={{height:5,background:"#1e3a5a",borderRadius:3}}>
-                  <div style={{height:"100%",width:`${confNum}%`,background:confNum>=70?"#00e676":confNum>=50?"#f59e0b":"#ff5252",borderRadius:3,transition:"width 1s ease"}}/>
-                </div>
-              </div>
-            )}
-
-            {/* Notes */}
-            {notes&&(
-              <div style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 12px"}}>
-                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:5}}>🤖 BONDO NOTES</div>
-                <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.7}}>{notes}</div>
-              </div>
-            )}
-
-            {!pattern&&(
-              <div style={{color:"#e8f4ff",fontSize:12,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{result}</div>
-            )}
+            <div style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"10px 12px"}}>
+              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:4}}>SIGNAL: {g("Signal")} · CONFIDENCE: {g("Confidence")}%</div>
+              <div style={{fontSize:12,lineHeight:1.7}}>{g("Notes")}</div>
+            </div>
           </div>
         )}
-
-        {/* Tips */}
-        {!image&&(
-          <div style={{marginTop:16,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:14}}>
-            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>💡 PRO TIPS</div>
-            {["Use TradingView's camera icon to download a clean chart screenshot","Crop out toolbars and side panels for best accuracy","Works with any timeframe — 5m, 15m, 1H, Daily","Ctrl+V to paste a screenshot directly from clipboard"].map((tip,i)=>(
-              <div key={i} style={{color:"#3a6e9a",fontSize:11,marginBottom:5,display:"flex",gap:6}}>
-                <span style={{color:"#00e676"}}>→</span>{tip}
-              </div>
-            ))}
-          </div>
-        )}
-
       </div>
     </div>
   );
@@ -2144,7 +2182,7 @@ function ChartTab({trades, initialSym}) {
       </div>
 
       {/* MAIN AREA */}
-      <div style={{flex:1,display:"flex",overflow:"hidden",flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
 
         {/* TRADINGVIEW CHART — YOUR ACCOUNT */}
         <div style={{flex:1,position:"relative",overflow:"hidden"}}>
@@ -2170,7 +2208,7 @@ function ChartTab({trades, initialSym}) {
         </div>
 
         {/* RIGHT PANEL — Trade Review */}
-        <div style={{width:typeof window!=="undefined"&&window.innerWidth<768?"100%":250,minWidth:typeof window!=="undefined"&&window.innerWidth<768?0:250,background:"#080e1a",borderLeft:typeof window!=="undefined"&&window.innerWidth<768?"none":"1px solid #1e3a5a",borderTop:typeof window!=="undefined"&&window.innerWidth<768?"1px solid #1e3a5a":"none",display:"flex",flexDirection:"column",overflow:"hidden",maxHeight:typeof window!=="undefined"&&window.innerWidth<768?"40vh":"none"}}>
+        <div style={{width:250,minWidth:250,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
           {/* Selected trade detail */}
           {selectedTrade&&(
@@ -2367,8 +2405,8 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
   const sel=selRow!==null?results[selRow]:null;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
-      <MobileSettingsPanel>
+    <div style={{display:"flex",flex:1,minHeight:0}}>
+      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:13,overflowY:"auto"}}>
         <Section title="EMA PERIODS">
           {[["EMA 1 (Fast)",ema1,setEma1],["EMA 2 (Mid)",ema2,setEma2],["EMA 3 (Slow)",ema3,setEma3]].map(([l,v,s])=>(
             <div key={l} style={{marginBottom:9}}>
@@ -2424,7 +2462,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"▶ RUN EMA SCAN"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </MobileSettingsPanel>
+      </div>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -2439,7 +2477,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>{lastScan?"No results matched filter.":"Press ▶ RUN EMA SCAN"}</div>}
           {results.length>0&&(
-            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE","EMA1","EMA2","EMA3","SPREAD%","SLOPE","STRENGTH","BOUNCE","REJECT","SWING★","TREND","SCORE"].map(h=>
                   <th key={h} style={{padding:"7px 7px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -2472,7 +2510,7 @@ function EMAScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersion,
                   </tr>;
                 })}
               </tbody>
-            </table></div>
+            </table>
           )}
         </div>
         {sel&&(
@@ -2584,8 +2622,8 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
   const fullyAligned=results.filter(r=>r.aligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
-      <MobileSettingsPanel>
+    <div style={{display:"flex",flex:1,minHeight:0}}>
+      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -2648,7 +2686,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SCAN ${direction}`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </MobileSettingsPanel>
+      </div>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -2661,7 +2699,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SCAN to find HalfTrend signals</div>}
           {results.length>0&&(
-            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()} BIAS`,`${tf2.toUpperCase()} CONFIRM`,`${tf3.toUpperCase()} ENTRY`,`${tf4.toUpperCase()} FINE`,"MATCH","REL VOL","ATR%","EMA DIST","SCORE","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -2738,7 +2776,7 @@ function HalfTrendScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVe
                   </tr>;
                 })}
               </tbody>
-            </table></div>
+            </table>
           )}
         </div>
       </div>
@@ -2813,8 +2851,8 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
   const fullyAligned=results.filter(r=>r.fullyAligned).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
-      <MobileSettingsPanel>
+    <div style={{display:"flex",flex:1,minHeight:0}}>
+      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <Section title="4 TIMEFRAMES (type any)">
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <TFInput label="TF1 BIAS" value={tf1} onChange={setTf1}/>
@@ -2875,7 +2913,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:`▶ SHA+HT ${direction} SCAN`}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.join(", ")}</div>}
-      </MobileSettingsPanel>
+      </div>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <MarketBanner/>
         <div style={{background:"#0a1520",borderBottom:"1px solid #1e3a5a",padding:"7px 14px",display:"flex",gap:16,flexWrap:"wrap"}}>
@@ -2888,7 +2926,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
         <div style={{overflowY:"auto",flex:1}}>
           {results.length===0&&!scanning&&<div style={{padding:40,textAlign:"center",color:"#2a5a7a",fontSize:13}}>Press ▶ SHA+HT SCAN to find signals</div>}
           {results.length>0&&(
-            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead><tr style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a"}}>
                 {["SYMBOL","PRICE",`${tf1.toUpperCase()}`,`${tf2.toUpperCase()}`,`${tf3.toUpperCase()}`,`${tf4.toUpperCase()}`,"MATCH","SIGNAL","TIME"].map(h=>
                   <th key={h} style={{padding:"7px 8px",textAlign:"left",color:"#2a6e9a",fontSize:9,fontWeight:700,letterSpacing:1,whiteSpace:"nowrap"}}>{h}</th>)}
@@ -2933,7 +2971,7 @@ function SHAHTScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVersio
                   </tr>;
                 })}
               </tbody>
-            </table></div>
+            </table>
           )}
         </div>
       </div>
@@ -3095,9 +3133,9 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
   const longs  = results.filter(r=>r.longReversal).length;
 
   return(
-    <div style={{display:"flex",flex:1,minHeight:0,flexDirection:typeof window!=="undefined"&&window.innerWidth<768?"column":"row"}}>
+    <div style={{display:"flex",flex:1,minHeight:0}}>
       {/* LEFT PANEL */}
-      <MobileSettingsPanel>
+      <div style={{width:250,minWidth:250,background:"#0a1520",borderRight:"1px solid #1e3a5a",padding:"14px 12px",display:"flex",flexDirection:"column",gap:14,overflowY:"auto"}}>
         <Section title="TIMEFRAMES">
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <TFInput label="TF1 (Gap chart)" value={tf1} onChange={setTf1}/>
@@ -3162,7 +3200,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
           {scanning?`SCANNING ${prog.done}/${prog.total}...`:"🎯 SCAN REVERSALS"}
         </button>
         {errors.length>0&&<div style={{fontSize:10,color:"#ff5722"}}>Failed: {errors.slice(0,5).join(", ")}</div>}
-      </MobileSettingsPanel>
+      </div>
 
       {/* RIGHT PANEL */}
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
@@ -3201,7 +3239,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
             </div>
           )}
           {results.length>0&&(
-            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
                 <tr style={{background:"#0a1520",position:"sticky",top:0,zIndex:1}}>
                   {["SYMBOL","TF","PRICE","200 EMA","EMA DIST %","GAP %","DIRECTION","CANDLES AGO","SCORE","ACTION"].map(h=>(
@@ -3276,7 +3314,7 @@ function ReversalScanner({symbols, pushKey, pushToken, soundOn, onSignal, logVer
                   );
                 })}
               </tbody>
-            </table></div>
+            </table>
           )}
         </div>
       </div>
@@ -3351,63 +3389,59 @@ export default function App(){
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
     {id:"pattern",label:"🔍 PATTERN AI",color:"#00e676"},
-    {id:"breadth",label:"🌡️ BREADTH",color:"#38bdf8"},
+    {id:"spike",label:"⚡ SPIKE",color:"#f59e0b"},
+    {id:"gap",label:"🌅 GAP",color:"#38bdf8"},
+    {id:"breadth",label:"🌡️ BREADTH",color:"#e040fb"},
+    {id:"premarket",label:"🌙 PRE+HOD",color:"#f59e0b"},
   ];
 
-  const isMobile = useMobile();
   const scannerProps = {symbols, pushKey, pushToken, soundOn, onSignal:handleSignal, logVersion, goToChart};
 
   return(
-    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column",maxWidth:"100vw",overflowX:"hidden"}}>
+    <div style={{fontFamily:"'Courier New',monospace",background:"#080e1a",minHeight:"100vh",color:"#c9d8e8",display:"flex",flexDirection:"column"}}>
       {/* HEADER */}
-      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:isMobile?"8px 10px":"10px 20px",display:"flex",flexDirection:"column",gap:6,transition:"all 0.3s"}}>
-        {/* Row 1: Logo */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <div style={{width:10,height:10,borderRadius:"50%",flexShrink:0,background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
-            <span style={{fontSize:isMobile?11:15,fontWeight:700,color:"#e8f4ff",letterSpacing:isMobile?1:2}}>ALO TRADING SCANNER</span>
-            <span style={{fontSize:9,color:"#ff9800",padding:"2px 6px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
-            {flashAlert&&<span style={{fontSize:10,color:"#ff9800",fontWeight:700}}>🚨 SIGNAL!</span>}
-          </div>
+      <div style={{background:flashAlert?"linear-gradient(90deg,#1a0a00,#0a1520)":"linear-gradient(90deg,#0d1b2e,#0a1520)",borderBottom:`2px solid ${flashAlert?"#ff9800":"#1e3a5a"}`,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,transition:"all 0.3s"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:10,height:10,borderRadius:"50%",background:flashAlert?"#ff9800":"#00e676",boxShadow:`0 0 ${flashAlert?"16px #ff9800":"8px #00e676"}`,transition:"all 0.3s"}}/>
+          <span style={{fontSize:15,fontWeight:700,color:"#e8f4ff",letterSpacing:2}}>ALO TRADING SCANNER</span>
+          <span style={{fontSize:10,color:"#ff9800",padding:"2px 8px",border:"1px solid #ff9800",borderRadius:3,fontWeight:700}}>v6.0 ATM</span>
+          {flashAlert&&<span style={{fontSize:11,color:"#ff9800",fontWeight:700,animation:"pulse 0.5s infinite"}}>🚨 SIGNAL FIRED!</span>}
         </div>
-        {/* Row 2: Watchlist */}
-        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,maxWidth:700,flexWrap:"wrap"}}>
           <span style={{fontSize:9,color:"#2a5a7a",letterSpacing:1,whiteSpace:"nowrap"}}>WATCHLIST</span>
+          {/* Preset dropdown */}
           <select onChange={e=>{if(e.target.value)updateSymbols(WATCHLIST_PRESETS[e.target.value].join(","));e.target.value="";}}
-            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none",maxWidth:isMobile?130:200}}>
-            <option value="">📋 Preset...</option>
-            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k}</option>)}
+            style={{background:"#0d1b2e",border:"1px solid #1e5a7a",borderRadius:4,color:"#00b4d8",padding:"4px 6px",fontSize:10,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
+            <option value="">📋 Load Preset...</option>
+            {Object.keys(WATCHLIST_PRESETS).map(k=><option key={k} value={k}>{k} ({WATCHLIST_PRESETS[k].length})</option>)}
           </select>
           <input value={symbols} onChange={e=>updateSymbols(e.target.value)}
-            style={{flex:1,minWidth:isMobile?80:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 8px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length}&#x2009;stk</span>
-        </div>
-        {/* Row 3: Filter */}
-        <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
-          <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
-            style={{width:48,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-          <span style={{fontSize:9,color:"#2a5a7a"}}>$min</span>
-          <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
-            style={{width:60,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
-          <span style={{fontSize:9,color:"#2a5a7a"}}>vol</span>
-          <button onClick={runFilter} disabled={filtering}
-            style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-            {filtering?"⏳ "+filterProg:"🔍 FILTER"}
-          </button>
-          {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
+            style={{flex:1,minWidth:200,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:4,color:"#8ab4cc",padding:"5px 10px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+          <span style={{fontSize:9,color:"#3a6e9a",whiteSpace:"nowrap"}}>{symbols.split(",").filter(s=>s.trim()).length} stocks</span>
+          {/* Live filter */}
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <input type="number" value={minPrice} onChange={e=>setMinPrice(Number(e.target.value))} title="Min Price $"
+              style={{width:45,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:9,color:"#2a5a7a"}}>$ min</span>
+            <input type="number" value={minVol} onChange={e=>setMinVol(Number(e.target.value))} title="Min Avg Volume"
+              style={{width:65,background:"#0d1b2e",border:"1px solid #1e3a5a",borderRadius:3,color:"#ffeb3b",padding:"3px 5px",fontSize:10,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+            <span style={{fontSize:9,color:"#2a5a7a"}}>vol min</span>
+            <button onClick={runFilter} disabled={filtering}
+              style={{padding:"4px 10px",background:filtering?"#0d1b2e":"linear-gradient(135deg,#0d3b1a,#0a4a28)",border:"1px solid #00e676",borderRadius:4,color:"#00e676",fontSize:9,fontFamily:"inherit",cursor:filtering?"not-allowed":"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+              {filtering?"⏳ "+filterProg:"🔍 FILTER"}
+            </button>
+            {filterProg&&!filtering&&<span style={{fontSize:9,color:"#00e676"}}>{filterProg}</span>}
+          </div>
         </div>
       </div>
 
-      {/* TABS — scrollable on mobile */}
-      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+      {/* TABS */}
+      <div style={{background:"#0a1520",borderBottom:"2px solid #1e3a5a",display:"flex"}}>
         {tabs.map(tab=>(
-          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{
-            padding:isMobile?"10px 10px":"10px 18px",
-            fontFamily:"inherit",fontSize:isMobile?9:11,fontWeight:700,letterSpacing:isMobile?0:1,
+          <button key={tab.id} onClick={()=>updateTab(tab.id)} style={{padding:"10px 18px",fontFamily:"inherit",fontSize:11,fontWeight:700,letterSpacing:1,
             background:activeTab===tab.id?"#0d1e30":"transparent",
             borderBottom:activeTab===tab.id?`2px solid ${tab.color}`:"2px solid transparent",
-            color:activeTab===tab.id?tab.color:"#3a6e9a",
-            border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap",flexShrink:0}}>
+            color:activeTab===tab.id?tab.color:"#3a6e9a",border:"none",cursor:"pointer",marginBottom:"-2px",whiteSpace:"nowrap"}}>
             {tab.label}
           </button>
         ))}
@@ -3415,8 +3449,13 @@ export default function App(){
 
       {/* CONTENT */}
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* LEFT RAIL — Alert settings + Signal Log (always visible) */}
+        {activeTab!=="pnl"&&(
+          <div style={{width:0,minWidth:0,display:"none"}}/>
+        )}
+
         {/* SCANNER AREA */}
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
           {activeTab==="ema"&&<EMAScanner {...scannerProps}/>}
           {activeTab==="ht"&&<HalfTrendScanner {...scannerProps}/>}
           {activeTab==="shaht"&&<SHAHTScanner {...scannerProps}/>}
@@ -3431,16 +3470,14 @@ export default function App(){
               <ChartTab trades={getBondoFundData()} initialSym={chartSym}/>
             </div>
           )}
-          {activeTab==="pattern"&&(
-            <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-              <ChartPatternAnalyzer/>
-            </div>
-          )}
+          {activeTab==="pattern"&&<ChartPatternAnalyzer/>}
+          {activeTab==="spike"&&<SpikeScanner/>}
+          {activeTab==="gap"&&<GapScanner/>}
           {activeTab==="breadth"&&<MarketBreadth/>}
+          {activeTab==="premarket"&&<PreMarketHODLOD/>}
         </div>
 
-        {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
-        {!isMobile&&(
+        {/* RIGHT SIDEBAR — Always visible */}
         <div style={{width:220,minWidth:220,background:"#080e1a",borderLeft:"1px solid #1e3a5a",display:"flex",flexDirection:"column",overflow:"hidden"}}>
           <AlertSettings
             pushKey={pushKey} setPushKey={setPushKey}
@@ -3450,7 +3487,6 @@ export default function App(){
           />
           <SignalLogPanel logVersion={logVersion}/>
         </div>
-        )}
       </div>
 
       <style>{`
@@ -3460,8 +3496,6 @@ export default function App(){
         ::-webkit-scrollbar-thumb{background:#1e3a5a;border-radius:3px;}
         input[type=range]{height:4px;}
         @keyframes pulse{0%{opacity:1;}50%{opacity:0.4;}100%{opacity:1;}}
-        /* hide scrollbar on tab bar */
-        div::-webkit-scrollbar:horizontal{height:0;}
       `}</style>
     </div>
   );
