@@ -1518,13 +1518,13 @@ function BondoFund() {
 
 // ─── CHART PATTERN ANALYZER ───────────────────────────────────────────────────
 function ChartPatternAnalyzer() {
-  const [image, setImage] = useState(null);
-  const [imageData, setImageData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const fileRef = useRef();
+  const [image, setImage] = React.useState(null);
+  const [imageData, setImageData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [dragging, setDragging] = React.useState(false);
+  const fileRef = React.useRef();
 
   const processFile = (file) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -1546,7 +1546,7 @@ function ChartPatternAnalyzer() {
     processFile(e.dataTransfer.files[0]);
   };
 
-  useEffect(() => {
+  React.useEffect(() => {
     const handler = (e) => {
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -1596,11 +1596,12 @@ If no clear pattern is visible, say Pattern: No clear pattern and explain in Not
         })
       });
       const data = await response.json();
+      if (data.error) { setError("API: " + data.error.message); return; }
       const text = data.content?.map(b => b.text || "").join("").trim();
       if (text) setResult(text);
       else setError("No analysis returned. Try a cleaner chart image.");
-    } catch {
-      setError("Analysis failed. Check connection and try again.");
+    } catch(e) {
+      setError("Error: " + e.message);
     } finally {
       setLoading(false);
     }
