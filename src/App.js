@@ -1516,328 +1516,250 @@ function BondoFund() {
 }
 
 
-// ─── SPIKE SCANNER ────────────────────────────────────────────────────────────
-function SpikeScanner() {
-  const [results, setResults] = useState([]);
+// ─── MARKET BREADTH ───────────────────────────────────────────────────────────
+function MarketBreadth() {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [lastScan, setLastScan] = useState(null);
-  const [minPrice, setMinPrice] = useState(5);
-  const [minVol, setMinVol] = useState(700000);
-  const [minPct, setMinPct] = useState(2);
-  const [minVolMult, setMinVolMult] = useState(2);
-  const [direction, setDirection] = useState("BOTH");
-  const [sortBy, setSortBy] = useState("pct");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
   const timerRef = useRef(null);
 
-  const scan = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=${API_KEY}&include_otc=false`);
-      const data = await res.json();
-      const tickers = data.tickers || [];
-      const filtered = tickers.filter(t => {
-        const price = t.day?.c || 0;
-        const avgVol = t.prevDay?.v || 1;
-        const pct = t.todaysChangePerc || 0;
-        const volMult = (t.day?.v || 0) / avgVol;
-        if (price < minPrice) return false;
-        if (avgVol < minVol) return false;
-        if (Math.abs(pct) < minPct) return false;
-        if (volMult < minVolMult) return false;
-        if (direction === "UP" && pct <= 0) return false;
-        if (direction === "DOWN" && pct >= 0) return false;
-        return true;
-      }).map(t => ({
-        symbol: t.ticker, price: t.day?.c||0, pct: t.todaysChangePerc||0,
-        vol: t.day?.v||0, avgVol: t.prevDay?.v||0,
-        volMult: (t.day?.v||0)/(t.prevDay?.v||1),
-        high: t.day?.h||0, low: t.day?.l||0,
-      }));
-      filtered.sort((a,b) => sortBy==="pct"?Math.abs(b.pct)-Math.abs(a.pct):sortBy==="vol"?b.volMult-a.volMult:b.price-a.price);
-      setResults(filtered.slice(0,100));
-      setLastScan(new Date().toLocaleTimeString());
-    } catch(e) { console.error(e); }
-    setLoading(false);
+  const isMarketOpen = () => {
+    const now = new Date();
+    const et = new Date(now.toLocaleString("en-US", {timeZone:"America/New_York"}));
+    const day = et.getDay();
+    const h = et.getHours(); const m = et.getMinutes();
+    const mins = h*60+m;
+    if (day===0||day===6) return false;
+    return mins >= 570 && mins < 960;
   };
 
-  useEffect(() => {
-    if (autoRefresh) { timerRef.current = setInterval(scan, 60000); }
-    else { clearInterval(timerRef.current); }
-    return () => clearInterval(timerRef.current);
-  }, [autoRefresh, minPrice, minVol, minPct, minVolMult, direction, sortBy]);
-
-  const fmt = n => n>=1000000?(n/1000000).toFixed(1)+"M":n>=1000?(n/1000).toFixed(0)+"K":String(n);
-
-  return (
-    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
-      <div style={{maxWidth:900,margin:"0 auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <div>
-            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
-            <div style={{fontSize:16,fontWeight:700}}>⚡ Spike Scanner</div>
-          </div>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            {lastScan&&<span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
-            <button onClick={()=>setAutoRefresh(a=>!a)} style={{padding:"5px 10px",background:autoRefresh?"#00e67622":"#0d1e30",border:`1px solid ${autoRefresh?"#00e676":"#1e3a5a"}`,borderRadius:5,color:autoRefresh?"#00e676":"#3a6e9a",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>{autoRefresh?"⏸ AUTO ON":"▶ AUTO OFF"}</button>
-            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading?"SCANNING...":"⚡ SCAN NOW"}</button>
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
-          {[["Min Price $",minPrice,setMinPrice,1,500,1],["Min Avg Vol",minVol,setMinVol,100000,5000000,100000],["Min % Move",minPct,setMinPct,0.5,20,0.5],["Min Vol Mult",minVolMult,setMinVolMult,1,10,0.5]].map(([label,val,setter,min,max,step])=>(
-            <div key={label}>
-              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>{label}</div>
-              <input type="number" value={val} min={min} max={max} step={step} onChange={e=>setter(Number(e.target.value))} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
-            </div>
-          ))}
-          <div>
-            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>DIRECTION</div>
-            <select value={direction} onChange={e=>setDirection(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
-              <option value="BOTH">Both</option><option value="UP">Up only</option><option value="DOWN">Down only</option>
-            </select>
-          </div>
-          <div>
-            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>SORT BY</div>
-            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
-              <option value="pct">% Move</option><option value="vol">Vol Mult</option><option value="price">Price</option>
-            </select>
-          </div>
-        </div>
-        {results.length>0&&<div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-          {[["SPIKES",results.length,"#e8f4ff"],["UP",results.filter(r=>r.pct>0).length,"#00e676"],["DOWN",results.filter(r=>r.pct<0).length,"#ff5252"],["AVG MOVE",(results.reduce((s,r)=>s+Math.abs(r.pct),0)/results.length).toFixed(1)+"%","#f59e0b"]].map(([l,v,c])=>(
-            <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
-              <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
-              <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
-            </div>
-          ))}
-        </div>}
-        {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>⚡ Scanning entire US market...</div>}
-        {!loading&&results.length===0&&lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No spikes matched. Try lowering filters.</div>}
-        {!loading&&!lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>Press ⚡ SCAN NOW to find spikes across Russell 3000+</div>}
-        {results.length>0&&<div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
-            <thead><tr style={{borderBottom:"1px solid #1e3a5a"}}>
-              {["SYMBOL","PRICE","% MOVE","VOLUME","VOL MULT","HIGH","LOW"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>)}
-            </tr></thead>
-            <tbody>{results.map((r,i)=>{
-              const up=r.pct>=0;
-              return <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}} onClick={()=>window.open(`https://finance.yahoo.com/quote/${r.symbol}`,"_blank")}>
-                <td style={{padding:"7px 8px",fontWeight:700}}>{r.symbol}</td>
-                <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
-                <td style={{padding:"7px 8px"}}><span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:`1px solid ${up?"#00e67644":"#ff525244"}`,borderRadius:4,padding:"1px 6px",fontWeight:700}}>{up?"+":""}{r.pct.toFixed(2)}%</span></td>
-                <td style={{padding:"7px 8px"}}>{fmt(r.vol)}</td>
-                <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
-                <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.high.toFixed(2)}</td>
-                <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.low.toFixed(2)}</td>
-              </tr>;
-            })}</tbody>
-          </table>
-        </div>}
-      </div>
-    </div>
-  );
-}
-
-
-// ─── GAP SCANNER ─────────────────────────────────────────────────────────────
-function GapScanner() {
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [lastScan, setLastScan] = useState(null);
-  const [minVol, setMinVol] = useState(700000);
-  const [minPrice, setMinPrice] = useState(5);
-  const [overrideGap, setOverrideGap] = useState(0);
-  const [direction, setDirection] = useState("BOTH");
-  const [sortBy, setSortBy] = useState("gap");
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const timerRef = useRef(null);
-
-  const getDynMin = (price) => {
-    if (price >= 500) return 1.0;
-    if (price >= 100) return 1.5;
-    if (price >= 20) return 2.0;
-    return 3.0;
-  };
-
-  const scan = async () => {
-    setLoading(true);
+  const fetch5min = async (sym) => {
     try {
-      const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=${API_KEY}&include_otc=false`;
+      const today = new Date().toISOString().split("T")[0];
+      const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/5/minute/${today}/${today}?adjusted=true&sort=asc&limit=100&apiKey=${API_KEY}`;
       const res = await fetch(url);
-      const data = await res.json();
-      const tickers = data.tickers || [];
+      const d = await res.json();
+      return d.results || [];
+    } catch { return []; }
+  };
 
-      const filtered = tickers.filter(t => {
-        const prevClose = t.prevDay?.c || 0;
-        const open = t.day?.o || 0;
-        const price = t.day?.c || open;
-        const avgVol = t.prevDay?.v || 1;
-        const vol = t.day?.v || 0;
-        if (!prevClose || !open) return false;
-        if (price < minPrice) return false;
-        if (avgVol < minVol) return false;
-        const gapPct = ((open - prevClose) / prevClose) * 100;
-        const minGap = overrideGap > 0 ? overrideGap : getDynMin(price);
-        if (Math.abs(gapPct) < minGap) return false;
-        if (direction === "UP" && gapPct <= 0) return false;
-        if (direction === "DOWN" && gapPct >= 0) return false;
-        return true;
-      }).map(t => {
-        const prevClose = t.prevDay?.c || 0;
-        const open = t.day?.o || 0;
-        const price = t.day?.c || open;
-        const gapPct = ((open - prevClose) / prevClose) * 100;
-        const gapAmt = open - prevClose;
-        const filling = gapPct > 0 ? price < open : price > open;
-        const extending = gapPct > 0 ? price > open : price < open;
-        const vol = t.day?.v || 0;
-        const avgVol = t.prevDay?.v || 1;
-        const minGap = overrideGap > 0 ? overrideGap : getDynMin(open);
-        return {
-          symbol: t.ticker,
-          price,
-          open,
-          prevClose,
-          gapPct,
-          gapAmt,
-          vol,
-          avgVol,
-          volMult: vol / avgVol,
-          filling,
-          extending,
-          high: t.day?.h || 0,
-          low: t.day?.l || 0,
-          minGap,
-        };
+  const fetchSnap = async (sym) => {
+    try {
+      const res = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${sym}?apiKey=${API_KEY}`);
+      const d = await res.json();
+      return d.ticker || null;
+    } catch { return null; }
+  };
+
+  const calcEMA = (closes, period) => {
+    if (closes.length < period) return null;
+    const k = 2/(period+1);
+    let ema = closes.slice(0,period).reduce((a,b)=>a+b,0)/period;
+    for (let i=period; i<closes.length; i++) ema = closes[i]*k + ema*(1-k);
+    return ema;
+  };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      // Fetch SPY, QQQ, VIX snapshots
+      const [spy, qqq, vix] = await Promise.all([
+        fetchSnap("SPY"), fetchSnap("QQQ"), fetchSnap("VIX")
+      ]);
+
+      // Fetch SPY 5min candles for EMA
+      const spyCandles = await fetch5min("SPY");
+      const spyCloses = spyCandles.map(c=>c.c);
+      const spy9  = calcEMA(spyCloses, 9);
+      const spy20 = calcEMA(spyCloses, 20);
+      const spy50 = calcEMA(spyCloses, 50);
+      const spyPrice = spy?.day?.c || 0;
+
+      // Fetch breadth snapshot - sample large caps for A/D
+      const snapRes = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey=${API_KEY}&include_otc=false`);
+      const snapData = await snapRes.json();
+      const tickers = snapData.tickers || [];
+
+      // Filter liquid stocks only (avg vol > 500k)
+      const liquid = tickers.filter(t => (t.prevDay?.v||0) > 500000);
+      const advancing = liquid.filter(t => (t.todaysChangePerc||0) > 0).length;
+      const declining = liquid.filter(t => (t.todaysChangePerc||0) < 0).length;
+      const unchanged = liquid.length - advancing - declining;
+      const adRatio = declining > 0 ? (advancing/declining).toFixed(2) : "∞";
+
+      // % above 50MA approximation using prevDay vs current
+      const above50 = liquid.filter(t => (t.day?.c||0) > (t.prevDay?.c||0)).length;
+      const pctAbove = liquid.length > 0 ? ((above50/liquid.length)*100).toFixed(1) : 0;
+
+      // New highs / new lows (52w)
+      const newHighs = liquid.filter(t => t.day?.c >= (t.day?.h||0) && (t.todaysChangePerc||0) > 1).length;
+      const newLows = liquid.filter(t => t.day?.c <= (t.day?.l||0) && (t.todaysChangePerc||0) < -1).length;
+
+      // SPY trend
+      let spyTrend = "NEUTRAL";
+      if (spy9 && spy20 && spy50) {
+        if (spyPrice > spy9 && spy9 > spy20) spyTrend = "STRONG BULL";
+        else if (spyPrice > spy20) spyTrend = "BULL";
+        else if (spyPrice < spy9 && spy9 < spy20) spyTrend = "STRONG BEAR";
+        else if (spyPrice < spy20) spyTrend = "BEAR";
+      }
+
+      // VIX reading
+      const vixPrice = vix?.day?.c || vix?.prevDay?.c || 0;
+      let vixState = vixPrice < 15 ? "LOW FEAR" : vixPrice < 20 ? "NORMAL" : vixPrice < 30 ? "ELEVATED" : "EXTREME FEAR";
+      let vixColor = vixPrice < 15 ? "#00e676" : vixPrice < 20 ? "#38bdf8" : vixPrice < 30 ? "#f59e0b" : "#ff5252";
+
+      // Market score 0-100
+      let score = 50;
+      if (spyTrend === "STRONG BULL") score += 20;
+      else if (spyTrend === "BULL") score += 10;
+      else if (spyTrend === "BEAR") score -= 10;
+      else if (spyTrend === "STRONG BEAR") score -= 20;
+      if (parseFloat(adRatio) > 2) score += 15;
+      else if (parseFloat(adRatio) > 1.5) score += 8;
+      else if (parseFloat(adRatio) < 0.7) score -= 15;
+      else if (parseFloat(adRatio) < 1) score -= 8;
+      if (vixPrice < 15) score += 10;
+      else if (vixPrice > 25) score -= 10;
+      else if (vixPrice > 30) score -= 20;
+      score = Math.max(0, Math.min(100, score));
+
+      let verdict = score >= 70 ? "SAFE TO TRADE 🟢" : score >= 50 ? "PROCEED WITH CAUTION 🟡" : "RISKY — STAY SMALL 🔴";
+      let verdictColor = score >= 70 ? "#00e676" : score >= 50 ? "#f59e0b" : "#ff5252";
+
+      setData({
+        spy: { price: spyPrice, pct: spy?.todaysChangePerc||0, trend: spyTrend, ema9: spy9, ema20: spy20, ema50: spy50 },
+        qqq: { price: qqq?.day?.c||0, pct: qqq?.todaysChangePerc||0 },
+        vix: { price: vixPrice, state: vixState, color: vixColor },
+        breadth: { advancing, declining, unchanged, adRatio, pctAbove, newHighs, newLows, total: liquid.length },
+        score, verdict, verdictColor,
+        marketOpen: isMarketOpen(),
       });
-
-      filtered.sort((a,b) => {
-        if (sortBy === "gap") return Math.abs(b.gapPct) - Math.abs(a.gapPct);
-        if (sortBy === "vol") return b.volMult - a.volMult;
-        if (sortBy === "price") return b.price - a.price;
-        return 0;
-      });
-
-      setResults(filtered.slice(0, 100));
-      setLastScan(new Date().toLocaleTimeString());
+      setLastUpdate(new Date().toLocaleTimeString());
     } catch(e) { console.error(e); }
     setLoading(false);
   };
 
   useEffect(() => {
-    if (autoRefresh) { timerRef.current = setInterval(scan, 60000); }
-    else { clearInterval(timerRef.current); }
+    load();
+    timerRef.current = setInterval(load, 120000);
     return () => clearInterval(timerRef.current);
-  }, [autoRefresh, minPrice, minVol, overrideGap, direction, sortBy]);
+  }, []);
 
-  const fmt = n => n>=1000000?(n/1000000).toFixed(1)+"M":n>=1000?(n/1000).toFixed(0)+"K":String(n);
+  const trendColor = (t) => t==="STRONG BULL"?"#00e676":t==="BULL"?"#38bdf8":t==="BEAR"?"#f59e0b":t==="STRONG BEAR"?"#ff5252":"#3a6e9a";
 
   return (
-    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
-      <div style={{maxWidth:950,margin:"0 auto"}}>
+    <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"14px 12px"}}>
+      <div style={{maxWidth:800,margin:"0 auto"}}>
 
         {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
           <div>
             <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
-            <div style={{fontSize:16,fontWeight:700}}>🌅 Gap Scanner</div>
-            <div style={{fontSize:10,color:"#3a6e9a"}}>Dynamic gap % based on price range</div>
+            <div style={{fontSize:16,fontWeight:700}}>🌡️ Market Breadth</div>
+            <div style={{fontSize:10,color:"#3a6e9a"}}>Auto-refreshes every 2 min · {data?.marketOpen?"🟢 MARKET OPEN":"🔴 MARKET CLOSED"}</div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            {lastScan&&<span style={{fontSize:10,color:"#3a6e9a"}}>Last: {lastScan}</span>}
-            <button onClick={()=>setAutoRefresh(a=>!a)} style={{padding:"5px 10px",background:autoRefresh?"#00e67622":"#0d1e30",border:`1px solid ${autoRefresh?"#00e676":"#1e3a5a"}`,borderRadius:5,color:autoRefresh?"#00e676":"#3a6e9a",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>{autoRefresh?"⏸ AUTO ON":"▶ AUTO OFF"}</button>
-            <button onClick={scan} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading?"SCANNING...":"🌅 SCAN GAPS"}</button>
-          </div>
-        </div>
-
-        {/* Dynamic gap legend */}
-        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-          {[["$5–$20","3%+","#e040fb"],["$20–$100","2%+","#f59e0b"],["$100–$500","1.5%+","#38bdf8"],["$500+","1%+","#00e676"]].map(([range,pct,color])=>(
-            <div key={range} style={{background:"#0d1e30",border:`1px solid ${color}44`,borderRadius:5,padding:"4px 10px",fontSize:10}}>
-              <span style={{color:"#3a6e9a"}}>{range} </span>
-              <span style={{color,fontWeight:700}}>{pct}</span>
-            </div>
-          ))}
-          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:5,padding:"4px 10px",fontSize:10,color:"#3a6e9a"}}>Override: manual min below</div>
-        </div>
-
-        {/* Filters */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
-          {[["Min Price $",minPrice,setMinPrice,1,500,1],["Min Avg Vol",minVol,setMinVol,100000,5000000,100000],["Override Gap %",overrideGap,setOverrideGap,0,20,0.5]].map(([label,val,setter,min,max,step])=>(
-            <div key={label}>
-              <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>{label}</div>
-              <input type="number" value={val} min={min} max={max} step={step} onChange={e=>setter(Number(e.target.value))}
-                style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace",boxSizing:"border-box"}}/>
-            </div>
-          ))}
-          <div>
-            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>DIRECTION</div>
-            <select value={direction} onChange={e=>setDirection(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
-              <option value="BOTH">Both</option><option value="UP">Gap Up</option><option value="DOWN">Gap Down</option>
-            </select>
-          </div>
-          <div>
-            <div style={{fontSize:9,color:"#3a6e9a",marginBottom:3}}>SORT BY</div>
-            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{width:"100%",background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"4px 8px",fontSize:12,fontFamily:"monospace"}}>
-              <option value="gap">Gap %</option><option value="vol">Vol Mult</option><option value="price">Price</option>
-            </select>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {lastUpdate&&<span style={{fontSize:10,color:"#3a6e9a"}}>Updated: {lastUpdate}</span>}
+            <button onClick={load} disabled={loading} style={{padding:"5px 14px",background:"#00e67611",border:"1px solid #00e67655",borderRadius:5,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{loading?"LOADING...":"🔄 REFRESH"}</button>
           </div>
         </div>
 
-        {/* Stats */}
-        {results.length>0&&<div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-          {[
-            ["TOTAL GAPS",results.length,"#e8f4ff"],
-            ["GAP UP",results.filter(r=>r.gapPct>0).length,"#00e676"],
-            ["GAP DOWN",results.filter(r=>r.gapPct<0).length,"#ff5252"],
-            ["FILLING",results.filter(r=>r.filling).length,"#f59e0b"],
-            ["EXTENDING",results.filter(r=>r.extending).length,"#38bdf8"],
-          ].map(([l,v,c])=>(
-            <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
-              <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
-              <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
+        {loading&&!data&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>🌡️ Loading market data...</div>}
+
+        {data&&<>
+          {/* VERDICT */}
+          <div style={{background:"#0d1e30",border:`2px solid ${data.verdictColor}44`,borderRadius:10,padding:"16px 20px",marginBottom:16,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.15em",marginBottom:6}}>9:45 AM TRADE SIGNAL</div>
+            <div style={{fontSize:20,fontWeight:700,color:data.verdictColor}}>{data.verdict}</div>
+            <div style={{marginTop:10,height:8,background:"#1e3a5a",borderRadius:4}}>
+              <div style={{height:"100%",width:`${data.score}%`,background:data.score>=70?"#00e676":data.score>=50?"#f59e0b":"#ff5252",borderRadius:4,transition:"width 1s"}}/>
             </div>
-          ))}
-        </div>}
+            <div style={{fontSize:10,color:"#3a6e9a",marginTop:4}}>Market Score: {data.score}/100</div>
+          </div>
 
-        {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>🌅 Scanning for gaps across Russell 3000+...</div>}
-        {!loading&&results.length===0&&lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>No gaps matched. Try lowering filters or override gap %.</div>}
-        {!loading&&!lastScan&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:13}}>
-          <div style={{fontSize:20,marginBottom:8}}>🌅</div>
-          Press 🌅 SCAN GAPS to find today's gap plays<br/>
-          <span style={{fontSize:11,marginTop:6,display:"block"}}>Best used at 9:30–9:45 AM for gap & go setups</span>
-        </div>}
+          {/* SPY + QQQ + VIX */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+            {[
+              ["SPY",data.spy.price,data.spy.pct,"#38bdf8",data.spy.trend,trendColor(data.spy.trend)],
+              ["QQQ",data.qqq.price,data.qqq.pct,"#e040fb",null,null],
+              ["VIX",data.vix.price,null,data.vix.color,data.vix.state,data.vix.color],
+            ].map(([sym,price,pct,color,label,labelColor])=>(
+              <div key={sym} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>{sym}</div>
+                <div style={{fontSize:18,fontWeight:700,color}}>${price.toFixed(2)}</div>
+                {pct!==null&&<div style={{fontSize:11,color:pct>=0?"#00e676":"#ff5252",marginTop:2}}>{pct>=0?"+":""}{pct.toFixed(2)}%</div>}
+                {label&&<div style={{fontSize:10,color:labelColor,fontWeight:700,marginTop:4}}>{label}</div>}
+              </div>
+            ))}
+          </div>
 
-        {/* Table */}
-        {results.length>0&&<div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:620}}>
-            <thead><tr style={{borderBottom:"1px solid #1e3a5a"}}>
-              {["SYMBOL","PRICE","GAP %","GAP $","PREV CLOSE","OPEN","STATUS","VOL MULT"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>)}
-            </tr></thead>
-            <tbody>{results.map((r,i)=>{
-              const up = r.gapPct >= 0;
-              const status = r.filling ? "FILLING" : r.extending ? "EXTENDING" : "FLAT";
-              const statusColor = r.filling ? "#f59e0b" : r.extending ? (up?"#00e676":"#ff5252") : "#3a6e9a";
-              return <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}}
-                onClick={()=>window.open(`https://finance.yahoo.com/quote/${r.symbol}`,"_blank")}>
-                <td style={{padding:"7px 8px",fontWeight:700,color:"#e8f4ff"}}>{r.symbol}</td>
-                <td style={{padding:"7px 8px",color:"#38bdf8"}}>${r.price.toFixed(2)}</td>
-                <td style={{padding:"7px 8px"}}>
-                  <span style={{background:up?"#00e67622":"#ff525222",color:up?"#00e676":"#ff5252",border:`1px solid ${up?"#00e67644":"#ff525244"}`,borderRadius:4,padding:"1px 6px",fontWeight:700}}>
-                    {up?"+":""}{r.gapPct.toFixed(2)}%
-                  </span>
-                </td>
-                <td style={{padding:"7px 8px",color:up?"#00e676":"#ff5252"}}>{up?"+":""}{r.gapAmt.toFixed(2)}</td>
-                <td style={{padding:"7px 8px",color:"#3a6e9a"}}>${r.prevClose.toFixed(2)}</td>
-                <td style={{padding:"7px 8px",color:"#e8f4ff"}}>${r.open.toFixed(2)}</td>
-                <td style={{padding:"7px 8px"}}>
-                  <span style={{color:statusColor,fontWeight:700,fontSize:10}}>{status}</span>
-                </td>
-                <td style={{padding:"7px 8px",color:r.volMult>=3?"#f59e0b":"#e8f4ff",fontWeight:r.volMult>=3?700:400}}>{r.volMult.toFixed(1)}x</td>
-              </tr>;
-            })}</tbody>
-          </table>
-        </div>}
+          {/* SPY EMAs */}
+          {data.spy.ema9&&<div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>SPY EMA LEVELS (5min)</div>
+            <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+              {[["EMA 9",data.spy.ema9,"#00e676"],["EMA 20",data.spy.ema20,"#38bdf8"],["EMA 50",data.spy.ema50,"#f59e0b"]].map(([l,v,c])=>(
+                <div key={l}>
+                  <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>{l}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:c}}>${v?v.toFixed(2):"—"}</div>
+                  <div style={{fontSize:9,color:data.spy.price>v?"#00e676":"#ff5252"}}>{data.spy.price>v?"▲ ABOVE":"▼ BELOW"}</div>
+                </div>
+              ))}
+              <div>
+                <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>TREND</div>
+                <div style={{fontSize:13,fontWeight:700,color:trendColor(data.spy.trend)}}>{data.spy.trend}</div>
+              </div>
+            </div>
+          </div>}
+
+          {/* Breadth */}
+          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>MARKET BREADTH ({data.breadth.total.toLocaleString()} liquid stocks)</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
+              {[
+                ["ADVANCING",data.breadth.advancing,"#00e676"],
+                ["DECLINING",data.breadth.declining,"#ff5252"],
+                ["UNCHANGED",data.breadth.unchanged,"#3a6e9a"],
+                ["A/D RATIO",data.breadth.adRatio,parseFloat(data.breadth.adRatio)>1.5?"#00e676":parseFloat(data.breadth.adRatio)<0.7?"#ff5252":"#f59e0b"],
+                ["NEW HIGHS",data.breadth.newHighs,"#00e676"],
+                ["NEW LOWS",data.breadth.newLows,"#ff5252"],
+              ].map(([l,v,c])=>(
+                <div key={l} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:6,padding:"8px 10px"}}>
+                  <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2}}>{l}</div>
+                  <div style={{fontSize:15,fontWeight:700,color:c}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {/* A/D Bar */}
+            <div style={{marginTop:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#3a6e9a",marginBottom:3}}>
+                <span>ADVANCING {((data.breadth.advancing/(data.breadth.advancing+data.breadth.declining))*100||0).toFixed(0)}%</span>
+                <span>DECLINING {((data.breadth.declining/(data.breadth.advancing+data.breadth.declining))*100||0).toFixed(0)}%</span>
+              </div>
+              <div style={{height:6,background:"#ff525244",borderRadius:3}}>
+                <div style={{height:"100%",width:`${(data.breadth.advancing/(data.breadth.advancing+data.breadth.declining))*100||0}%`,background:"#00e676",borderRadius:3}}/>
+              </div>
+            </div>
+          </div>
+
+          {/* Trade Checklist */}
+          <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>9:45 AM CHECKLIST</div>
+            {[
+              ["SPY above EMA 9", data.spy.price > (data.spy.ema9||0)],
+              ["SPY above EMA 20", data.spy.price > (data.spy.ema20||0)],
+              ["VIX below 25", data.vix.price < 25],
+              ["More stocks advancing than declining", data.breadth.advancing > data.breadth.declining],
+              ["A/D Ratio above 1.5", parseFloat(data.breadth.adRatio) > 1.5],
+              ["Market is open", data.marketOpen],
+            ].map(([label, pass])=>(
+              <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:"1px solid #0d2030"}}>
+                <span style={{fontSize:14}}>{pass?"✅":"❌"}</span>
+                <span style={{fontSize:12,color:pass?"#e8f4ff":"#3a6e9a"}}>{label}</span>
+              </div>
+            ))}
+          </div>
+        </>}
       </div>
     </div>
   );
@@ -3429,8 +3351,7 @@ export default function App(){
     {id:"pnl",label:"🏦 BONDO FUND",color:"#00e676"},
     {id:"chart",label:"📈 CHART",color:"#ff9800"},
     {id:"pattern",label:"🔍 PATTERN AI",color:"#00e676"},
-    {id:"spike",label:"⚡ SPIKE",color:"#f59e0b"},
-    {id:"gap",label:"🌅 GAP",color:"#38bdf8"},
+    {id:"breadth",label:"🌡️ BREADTH",color:"#38bdf8"},
   ];
 
   const isMobile = useMobile();
@@ -3515,8 +3436,7 @@ export default function App(){
               <ChartPatternAnalyzer/>
             </div>
           )}
-          {activeTab==="spike"&&<SpikeScanner/>}
-          {activeTab==="gap"&&<GapScanner/>}
+          {activeTab==="breadth"&&<MarketBreadth/>}
         </div>
 
         {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
