@@ -2463,7 +2463,7 @@ function PreMarketHODLOD() {
 }
 
 
-// ─── FINANCIAL ASTROLOGY ──────────────────────────────────────────────────────
+// ─── FINANCIAL ASTROLOGY v2.0 ─────────────────────────────────────────────────
 function FinancialAstrology({goToHTScanner}) {
   const [symbol, setSymbol] = useState("NKE");
   const [inputSym, setInputSym] = useState("NKE");
@@ -2474,996 +2474,873 @@ function FinancialAstrology({goToHTScanner}) {
   const [activeView, setActiveView] = useState("single");
   const [scanFilter, setScanFilter] = useState("ALL");
 
-  // ── IPO Database (Top 50 S&P 500 + key ETFs) ──────────────────────────────
+  // ── Date picker state ──────────────────────────────────────────────────────
+  const todayObj = new Date();
+  const [selectedDate, setSelectedDate] = useState(
+    todayObj.toISOString().split("T")[0]
+  );
+  const [timelineData, setTimelineData] = useState([]);
+  const [showTimeline, setShowTimeline] = useState(false);
+
+  // ── IPO Database (Full S&P 500+) ──────────────────────────────────────────
   const IPO_DB = {
-    // Mega caps
-    AAPL: {date:[1980,12,12], name:"Apple"},
-    MSFT: {date:[1986,3,13],  name:"Microsoft"},
-    NVDA: {date:[1999,1,22],  name:"Nvidia"},
-    AMZN: {date:[1997,5,15],  name:"Amazon"},
-    GOOGL:{date:[2004,8,19],  name:"Alphabet"},
-    META: {date:[2012,5,18],  name:"Meta"},
-    TSLA: {date:[2010,6,29],  name:"Tesla"},
-    NFLX: {date:[2002,5,23],  name:"Netflix"},
-    BRKB: {date:[1996,5,9],   name:"Berkshire B"},
-    JPM:  {date:[1969,1,2],   name:"JPMorgan"},
-    // Tech
-    AMD:  {date:[1979,9,27],  name:"AMD"},
-    INTC: {date:[1971,10,13], name:"Intel"},
-    CRM:  {date:[2004,6,23],  name:"Salesforce"},
-    ORCL: {date:[1986,3,12],  name:"Oracle"},
-    CSCO: {date:[1990,2,16],  name:"Cisco"},
-    ADBE: {date:[1986,8,20],  name:"Adobe"},
-    PYPL: {date:[2015,7,20],  name:"PayPal"},
-    SQ:   {date:[2015,11,19], name:"Block"},
-    UBER: {date:[2019,5,10],  name:"Uber"},
-    ABNB: {date:[2020,12,10], name:"Airbnb"},
-    SNOW: {date:[2020,9,16],  name:"Snowflake"},
-    PLTR: {date:[2020,9,30],  name:"Palantir"},
-    COIN: {date:[2021,4,14],  name:"Coinbase"},
-    // Finance
-    GS:   {date:[1999,5,4],   name:"Goldman Sachs"},
-    BAC:  {date:[1972,1,3],   name:"Bank of America"},
-    WFC:  {date:[1970,1,2],   name:"Wells Fargo"},
-    MS:   {date:[1986,3,21],  name:"Morgan Stanley"},
-    V:    {date:[2008,3,19],  name:"Visa"},
-    MA:   {date:[2006,5,25],  name:"Mastercard"},
-    // Consumer
-    NKE:  {date:[1980,12,2],  name:"Nike"},
-    SBUX: {date:[1992,6,26],  name:"Starbucks"},
-    MCD:  {date:[1966,4,21],  name:"McDonald's"},
-    KO:   {date:[1919,9,5],   name:"Coca-Cola"},
-    PEP:  {date:[1972,6,1],   name:"PepsiCo"},
-    WMT:  {date:[1972,8,25],  name:"Walmart"},
-    TGT:  {date:[1967,2,8],   name:"Target"},
-    AMGN: {date:[1983,6,17],  name:"Amgen"},
-    // Healthcare
-    JNJ:  {date:[1944,9,25],  name:"J&J"},
-    PFE:  {date:[1944,1,3],   name:"Pfizer"},
-    MRNA: {date:[2018,12,6],  name:"Moderna"},
-    UNH:  {date:[1984,10,17], name:"UnitedHealth"},
-    // Energy
-    XOM:  {date:[1920,3,1],   name:"ExxonMobil"},
-    CVX:  {date:[1925,1,2],   name:"Chevron"},
-    // ETFs
-    SPY:  {date:[1993,1,22],  name:"S&P 500 ETF"},
-    QQQ:  {date:[1999,3,10],  name:"Nasdaq ETF"},
-    IWM:  {date:[2000,5,22],  name:"Russell 2000"},
-    GLD:  {date:[2004,11,18], name:"Gold ETF"},
-    // Crypto adjacent
-    MARA: {date:[2012,6,26],  name:"Marathon Digital"},
-    MSTR: {date:[1998,6,11],  name:"MicroStrategy"},
-    // Retail favorites
-    SOFI: {date:[2021,6,1],   name:"SoFi"},
-    RIVN: {date:[2021,11,10], name:"Rivian"},
-    BABA: {date:[2014,9,19],  name:"Alibaba"},
-    // ── Batch 2: Major S&P 500 ──────────────────────────────────────────────
-    COST: {date:[1985,12,5],  name:"Costco"},
-    HD:   {date:[1981,9,22],  name:"Home Depot"},
-    LOW:  {date:[1961,10,10], name:"Lowe's"},
-    TJX:  {date:[1987,1,23],  name:"TJX Companies"},
-    DIS:  {date:[1957,11,12], name:"Disney"},
-    BA:   {date:[1934,9,5],   name:"Boeing"},
-    GE:   {date:[1892,1,2],   name:"GE Aerospace"},
-    MMM:  {date:[1916,8,8],   name:"3M"},
-    CAT:  {date:[1929,12,2],  name:"Caterpillar"},
-    HON:  {date:[1914,4,15],  name:"Honeywell"},
-    LMT:  {date:[1995,3,15],  name:"Lockheed Martin"},
-    RTX:  {date:[1934,9,5],   name:"RTX Corp"},
-    DE:   {date:[1978,6,15],  name:"Deere & Co"},
-    ABBV: {date:[2013,1,2],   name:"AbbVie"},
-    LLY:  {date:[1952,7,22],  name:"Eli Lilly"},
-    TMO:  {date:[1980,7,15],  name:"Thermo Fisher"},
-    MDT:  {date:[1960,10,11], name:"Medtronic"},
-    ISRG: {date:[2000,6,7],   name:"Intuitive Surgical"},
-    REGN: {date:[1991,4,4],   name:"Regeneron"},
-    BLK:  {date:[1999,10,1],  name:"BlackRock"},
-    AXP:  {date:[1977,5,2],   name:"American Express"},
-    C:    {date:[1986,6,3],   name:"Citigroup"},
-    IBM:  {date:[1915,11,11], name:"IBM"},
-    QCOM: {date:[1991,12,13], name:"Qualcomm"},
-    AVGO: {date:[2009,8,6],   name:"Broadcom"},
-    MU:   {date:[1984,10,5],  name:"Micron"},
-    NOW:  {date:[2012,6,29],  name:"ServiceNow"},
-    PANW: {date:[2012,7,20],  name:"Palo Alto Networks"},
-    CRWD: {date:[2019,6,12],  name:"CrowdStrike"},
-    // ── Batch 3: Telecom, Consumer, Auto, Travel ────────────────────────────
-    T:    {date:[1984,1,2],   name:"AT&T"},
-    VZ:   {date:[1983,11,21], name:"Verizon"},
-    TMUS: {date:[2007,7,2],   name:"T-Mobile"},
-    SPOT: {date:[2018,4,3],   name:"Spotify"},
-    SNAP: {date:[2017,3,2],   name:"Snap"},
-    SPGI: {date:[1966,5,2],   name:"S&P Global"},
-    CME:  {date:[2002,12,6],  name:"CME Group"},
-    CVS:  {date:[1972,1,3],   name:"CVS Health"},
-    CI:   {date:[1974,3,7],   name:"Cigna"},
-    AMT:  {date:[1998,6,4],   name:"American Tower"},
-    PLD:  {date:[1997,11,20], name:"Prologis"},
-    PG:   {date:[1890,1,2],   name:"Procter & Gamble"},
-    PM:   {date:[2008,3,31],  name:"Philip Morris"},
-    MO:   {date:[1928,1,2],   name:"Altria"},
-    F:    {date:[1956,2,24],  name:"Ford"},
-    GM:   {date:[2010,11,18], name:"General Motors"},
-    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
-    MAR:  {date:[1998,10,8],  name:"Marriott"},
-    HLT:  {date:[2013,12,12], name:"Hilton"},
-    FTNT: {date:[2009,11,18], name:"Fortinet"},
-    // ── Batch 4: Growth & Global ─────────────────────────────────────────────
-    ACN:  {date:[2001,7,19],  name:"Accenture"},
-    INTU: {date:[1993,3,12],  name:"Intuit"},
-    ANET: {date:[2014,6,6],   name:"Arista Networks"},
-    TTD:  {date:[2016,9,21],  name:"Trade Desk"},
-    DASH: {date:[2020,12,9],  name:"DoorDash"},
-    APP:  {date:[2018,9,18],  name:"AppLovin"},
-    AFRM: {date:[2021,1,13],  name:"Affirm"},
-    SMCI: {date:[2007,3,29],  name:"Super Micro"},
-    ARM:  {date:[2023,9,14],  name:"ARM Holdings"},
-    ASML: {date:[1995,3,6],   name:"ASML"},
-    TSM:  {date:[1994,10,13], name:"TSMC"},
-    SHOP: {date:[2015,5,21],  name:"Shopify"},
-    MELI: {date:[2007,8,10],  name:"MercadoLibre"},
-    NET:  {date:[2019,9,13],  name:"Cloudflare"},
-    HUBS: {date:[2014,10,9],  name:"HubSpot"},
-    ZM:   {date:[2019,4,18],  name:"Zoom"},
-    DKNG: {date:[2020,4,24],  name:"DraftKings"},
-    AXON: {date:[2001,5,9],   name:"Axon Enterprise"},
-    BKNG: {date:[1999,3,30],  name:"Booking Holdings"},
-    LULU: {date:[2007,7,27],  name:"Lululemon"},
-    RL:   {date:[1997,6,12],  name:"Ralph Lauren"},
-    RCL:  {date:[1993,4,10],  name:"Royal Caribbean"},
-    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
-    EXPE: {date:[1999,11,8],  name:"Expedia"},
-    WBD:  {date:[2022,4,11],  name:"Warner Bros Discovery"},
-    LRCX: {date:[1984,5,7],   name:"Lam Research"},
-    KLAC: {date:[1980,6,16],  name:"KLA Corp"},
-    MRVL: {date:[2000,6,27],  name:"Marvell Tech"},
-    // ── Batch 5: Healthcare, Biotech, Specialty ──────────────────────────────
-    GILD: {date:[1992,1,22],  name:"Gilead Sciences"},
-    BIIB: {date:[1991,3,6],   name:"Biogen"},
-    ILMN: {date:[2000,7,28],  name:"Illumina"},
-    IDXX: {date:[1991,6,12],  name:"IDEXX Labs"},
-    MTD:  {date:[1997,10,28], name:"Mettler-Toledo"},
-    EW:   {date:[1970,10,1],  name:"Edwards Lifesciences"},
-    STE:  {date:[1992,11,3],  name:"Steris"},
-    BAX:  {date:[1952,1,2],   name:"Baxter"},
-    BDX:  {date:[1926,5,1],   name:"Becton Dickinson"},
-    ZBH:  {date:[2001,8,7],   name:"Zimmer Biomet"},
-    HOLX: {date:[1990,5,1],   name:"Hologic"},
-    ALGN: {date:[2001,5,25],  name:"Align Technology"},
-    DXCM: {date:[2005,4,28],  name:"Dexcom"},
-    PODD: {date:[2007,5,11],  name:"Insulet"},
-    INCY: {date:[1993,11,18], name:"Incyte"},
-    EXAS: {date:[2001,2,8],   name:"Exact Sciences"},
-    // ── Batch 5b: Financials & Insurance ─────────────────────────────────────
-    CB:   {date:[1985,5,1],   name:"Chubb"},
-    AON:  {date:[1982,9,1],   name:"Aon"},
-    MMC:  {date:[1962,3,1],   name:"Marsh McLennan"},
-    TRV:  {date:[1864,1,2],   name:"Travelers"},
-    ALL:  {date:[1993,6,2],   name:"Allstate"},
-    PRU:  {date:[2001,12,13], name:"Prudential"},
-    AFL:  {date:[1974,2,5],   name:"Aflac"},
-    MFC:  {date:[1999,9,24],  name:"Manulife"},
-    STT:  {date:[1967,3,1],   name:"State Street"},
-    BK:   {date:[1993,1,4],   name:"BNY Mellon"},
-    TROW: {date:[1986,4,8],   name:"T Rowe Price"},
-    IVZ:  {date:[2000,2,3],   name:"Invesco"},
-    // ── Batch 5c: Energy & Utilities ─────────────────────────────────────────
-    COP:  {date:[2002,4,16],  name:"ConocoPhillips"},
-    EOG:  {date:[1999,8,26],  name:"EOG Resources"},
-    PXD:  {date:[1997,8,7],   name:"Pioneer Natural"},
-    MPC:  {date:[2011,6,23],  name:"Marathon Petroleum"},
-    VLO:  {date:[1981,10,1],  name:"Valero Energy"},
-    PSX:  {date:[2012,4,30],  name:"Phillips 66"},
-    OXY:  {date:[1964,4,1],   name:"Occidental"},
-    HAL:  {date:[1948,1,2],   name:"Halliburton"},
-    BKR:  {date:[2017,7,3],   name:"Baker Hughes"},
-    NEE:  {date:[1984,6,1],   name:"NextEra Energy"},
-    DUK:  {date:[1904,5,1],   name:"Duke Energy"},
-    SO:   {date:[1949,11,1],  name:"Southern Company"},
-    AEP:  {date:[1947,1,2],   name:"American Elec Power"},
-    EXC:  {date:[1994,1,3],   name:"Exelon"},
-    PCG:  {date:[1912,10,1],  name:"PG&E"},
-    // ── Batch 5d: Consumer Discretionary ─────────────────────────────────────
-    AMZN: {date:[1997,5,15],  name:"Amazon"},
-    HD:   {date:[1981,9,22],  name:"Home Depot"},
-    NKE:  {date:[1980,12,2],  name:"Nike"},
-    SBUX: {date:[1992,6,26],  name:"Starbucks"},
-    YUM:  {date:[1997,10,7],  name:"Yum Brands"},
-    CMG:  {date:[2006,1,26],  name:"Chipotle"},
-    DPZ:  {date:[2004,7,13],  name:"Domino's Pizza"},
-    QSR:  {date:[2014,12,12], name:"Restaurant Brands"},
-    DINE: {date:[1991,7,1],   name:"Dine Brands"},
-    PLAY: {date:[2014,11,20], name:"Dave & Buster's"},
-    WING: {date:[2015,10,29], name:"Wingstop"},
-    SHAK: {date:[2015,1,30],  name:"Shake Shack"},
-    BROS: {date:[2021,9,29],  name:"Dutch Bros"},
-    // ── Batch 5e: Tech Infrastructure ────────────────────────────────────────
-    AKAMAI:{date:[1999,10,29],name:"Akamai"},
-    AKAM: {date:[1999,10,29], name:"Akamai Tech"},
-    VRT:  {date:[2023,6,8],   name:"Vertiv"},
-    PWR:  {date:[2001,2,6],   name:"Quanta Services"},
-    CARR: {date:[2020,4,3],   name:"Carrier Global"},
-    OTIS: {date:[2020,4,3],   name:"Otis Worldwide"},
-    TT:   {date:[1925,1,2],   name:"Trane Technologies"},
-    JCI:  {date:[1978,5,1],   name:"Johnson Controls"},
-    AME:  {date:[1930,1,2],   name:"AMETEK"},
-    ROK:  {date:[1990,9,1],   name:"Rockwell Automation"},
-    PH:   {date:[1938,1,2],   name:"Parker Hannifin"},
-    ITW:  {date:[1967,3,1],   name:"Illinois Tool Works"},
-    DOV:  {date:[1955,3,1],   name:"Dover Corp"},
-    XYL:  {date:[2011,10,31], name:"Xylem"},
-    ROP:  {date:[1992,11,3],  name:"Roper Technologies"},
-    // ── Batch 5f: Materials & Specialty ──────────────────────────────────────
-    LIN:  {date:[1992,7,1],   name:"Linde"},
-    APD:  {date:[1961,7,1],   name:"Air Products"},
-    ECL:  {date:[1957,4,1],   name:"Ecolab"},
-    PPG:  {date:[1899,1,2],   name:"PPG Industries"},
-    SHW:  {date:[1964,11,1],  name:"Sherwin-Williams"},
-    VMC:  {date:[1956,3,1],   name:"Vulcan Materials"},
-    MLM:  {date:[1994,2,28],  name:"Martin Marietta"},
-    NUE:  {date:[1968,6,1],   name:"Nucor"},
-    STLD: {date:[1996,11,21], name:"Steel Dynamics"},
-    RS:   {date:[1994,10,3],  name:"Reliance Steel"},
-    // ── Batch 5g: More Growth Stocks ─────────────────────────────────────────
-    UBER: {date:[2019,5,10],  name:"Uber"},
-    LYFT: {date:[2019,3,29],  name:"Lyft"},
-    DASH: {date:[2020,12,9],  name:"DoorDash"},
-    RBLX: {date:[2021,3,10],  name:"Roblox"},
-    U:    {date:[2020,9,18],  name:"Unity"},
-    GTLB: {date:[2021,10,14], name:"GitLab"},
-    SMAR: {date:[2018,4,27],  name:"Smartsheet"},
-    FROG: {date:[2020,9,16],  name:"JFrog"},
-    S:    {date:[2021,6,30],  name:"SentinelOne"},
-    ESTC: {date:[2018,10,5],  name:"Elastic"},
-    CFLT: {date:[2021,6,24],  name:"Confluent"},
-    IOT:  {date:[2021,12,15], name:"Samsara"},
-    TASK: {date:[2021,7,23],  name:"TaskUs"},
-    BRZE: {date:[2021,11,3],  name:"Braze"},
-    TOST: {date:[2021,9,22],  name:"Toast"},
-    // ── Batch 6: S&P 500 Core ────────────────────────────────────────────────
-    ABT:  {date:[1929,11,1],  name:"Abbott Labs"},
-    ABBV: {date:[2013,1,2],   name:"AbbVie"},
-    A:    {date:[1999,11,18], name:"Agilent Tech"},
-    AKAM: {date:[1999,10,29], name:"Akamai"},
-    ALB:  {date:[1994,2,28],  name:"Albemarle"},
-    ARE:  {date:[1994,5,26],  name:"Alexandria RE"},
-    ALLE: {date:[2013,11,18], name:"Allegion"},
-    LNT:  {date:[1995,1,3],   name:"Alliant Energy"},
-    GOOGL:{date:[2004,8,19],  name:"Alphabet A"},
-    MO:   {date:[1928,1,2],   name:"Altria"},
-    AMCR: {date:[2019,6,11],  name:"Amcor"},
-    AEE:  {date:[1947,1,2],   name:"Ameren"},
-    AIG:  {date:[1969,5,1],   name:"AIG"},
-    AWK:  {date:[2008,4,23],  name:"American Water Works"},
-    AMP:  {date:[2005,9,30],  name:"Ameriprise"},
-    ABC:  {date:[2001,3,1],   name:"AmerisourceBergen"},
-    AMT:  {date:[1998,6,4],   name:"American Tower"},
-    APH:  {date:[1991,11,21], name:"Amphenol"},
-    ADI:  {date:[1969,11,1],  name:"Analog Devices"},
-    ANSS: {date:[1996,6,10],  name:"Ansys"},
-    AON:  {date:[1982,9,1],   name:"Aon"},
-    APA:  {date:[1969,1,2],   name:"APA Corp"},
-    AAPL: {date:[1980,12,12], name:"Apple"},
-    AMAT: {date:[1972,10,5],  name:"Applied Materials"},
-    APTV: {date:[2011,11,17], name:"Aptiv"},
-    AJG:  {date:[1981,6,1],   name:"Arthur J Gallagher"},
-    AIZ:  {date:[2003,2,5],   name:"Assurant"},
-    T:    {date:[1984,1,2],   name:"AT&T"},
-    ATO:  {date:[1983,11,1],  name:"Atmos Energy"},
-    ADSK: {date:[1985,6,21],  name:"Autodesk"},
-    AZO:  {date:[1991,11,18], name:"AutoZone"},
-    AVB:  {date:[1994,3,11],  name:"AvalonBay"},
-    AVY:  {date:[1961,9,1],   name:"Avery Dennison"},
-    AXON: {date:[2001,5,9],   name:"Axon Enterprise"},
-    BKR:  {date:[2017,7,3],   name:"Baker Hughes"},
-    BALL: {date:[1972,11,1],  name:"Ball Corp"},
-    BAC:  {date:[1972,1,3],   name:"Bank of America"},
-    BK:   {date:[1993,1,4],   name:"BNY Mellon"},
-    BAX:  {date:[1952,1,2],   name:"Baxter"},
-    BDX:  {date:[1926,5,1],   name:"Becton Dickinson"},
-    WRB:  {date:[1974,8,1],   name:"WR Berkley"},
-    BBY:  {date:[1985,5,20],  name:"Best Buy"},
-    BIO:  {date:[1996,11,20], name:"Bio-Rad Labs"},
-    TECH: {date:[1997,12,3],  name:"Bio-Techne"},
-    BIIB: {date:[1991,3,6],   name:"Biogen"},
-    BLK:  {date:[1999,10,1],  name:"BlackRock"},
-    BX:   {date:[2007,6,22],  name:"Blackstone"},
-    BA:   {date:[1934,9,5],   name:"Boeing"},
-    BKNG: {date:[1999,3,30],  name:"Booking Holdings"},
-    BWA:  {date:[1993,4,8],   name:"BorgWarner"},
-    BSX:  {date:[1992,5,18],  name:"Boston Scientific"},
-    BMY:  {date:[1929,7,1],   name:"Bristol Myers Squibb"},
-    AVGO: {date:[2009,8,6],   name:"Broadcom"},
-    BR:   {date:[2007,3,30],  name:"Broadridge Financial"},
-    BRO:  {date:[1993,1,4],   name:"Brown & Brown"},
-    BF:   {date:[1933,1,2],   name:"Brown-Forman"},
-    BLDR: {date:[2004,7,22],  name:"Builders FirstSource"},
-    BG:   {date:[2001,8,1],   name:"Bunge Global"},
-    CDNS: {date:[1988,5,2],   name:"Cadence Design"},
-    CZR:  {date:[2004,1,28],  name:"Caesars Entertainment"},
-    CPT:  {date:[1993,3,19],  name:"Camden Property"},
-    CPB:  {date:[1954,6,1],   name:"Campbell Soup"},
-    COF:  {date:[1994,11,16], name:"Capital One"},
-    CAH:  {date:[1983,8,1],   name:"Cardinal Health"},
-    KMX:  {date:[2002,2,1],   name:"CarMax"},
-    CCL:  {date:[1987,7,31],  name:"Carnival"},
-    CARR: {date:[2020,4,3],   name:"Carrier Global"},
-    CAT:  {date:[1929,12,2],  name:"Caterpillar"},
-    CBRE: {date:[2004,6,10],  name:"CBRE Group"},
-    CDW:  {date:[2013,7,2],   name:"CDW Corp"},
-    CE:   {date:[2005,1,26],  name:"Celanese"},
-    COR:  {date:[2001,3,1],   name:"Cencora"},
-    CNC:  {date:[2001,1,3],   name:"Centene"},
-    CNP:  {date:[1930,6,1],   name:"CenterPoint Energy"},
-    CF:   {date:[2005,8,10],  name:"CF Industries"},
-    CRL:  {date:[2000,6,27],  name:"Charles River Labs"},
-    SCHW: {date:[1987,9,22],  name:"Charles Schwab"},
-    CHD:  {date:[1981,1,2],   name:"Church & Dwight"},
-    CINF: {date:[1957,8,1],   name:"Cincinnati Financial"},
-    CTAS: {date:[1983,6,21],  name:"Cintas"},
-    CSCO: {date:[1990,2,16],  name:"Cisco"},
-    C:    {date:[1986,6,3],   name:"Citigroup"},
-    CFG:  {date:[2014,9,24],  name:"Citizens Financial"},
-    CLX:  {date:[1969,5,1],   name:"Clorox"},
-    CME:  {date:[2002,12,6],  name:"CME Group"},
-    CMS:  {date:[1987,3,1],   name:"CMS Energy"},
-    KO:   {date:[1919,9,5],   name:"Coca-Cola"},
-    CTSH: {date:[1998,6,19],  name:"Cognizant"},
-    CL:   {date:[1923,9,25],  name:"Colgate-Palmolive"},
-    CMCSA:{date:[1972,6,29],  name:"Comcast"},
-    CMA:  {date:[1973,1,2],   name:"Comerica"},
-    CAG:  {date:[1983,9,1],   name:"ConAgra Brands"},
-    COP:  {date:[2002,4,16],  name:"ConocoPhillips"},
-    ED:   {date:[1936,5,1],   name:"Consolidated Edison"},
-    STZ:  {date:[1972,11,1],  name:"Constellation Brands"},
-    CEG:  {date:[2022,2,2],   name:"Constellation Energy"},
-    COO:  {date:[1997,5,1],   name:"Cooper Companies"},
-    CPRT: {date:[1994,2,22],  name:"Copart"},
-    GLW:  {date:[1945,5,1],   name:"Corning"},
-    CTVA: {date:[2019,6,3],   name:"Corteva"},
-    COST: {date:[1985,12,5],  name:"Costco"},
-    CTRA: {date:[2020,10,1],  name:"Coterra Energy"},
-    CCI:  {date:[1998,8,18],  name:"Crown Castle"},
-    CSX:  {date:[1980,5,1],   name:"CSX Corp"},
-    CMI:  {date:[1952,2,1],   name:"Cummins"},
-    CVS:  {date:[1972,1,3],   name:"CVS Health"},
-    DHI:  {date:[1992,6,12],  name:"DR Horton"},
-    DHR:  {date:[1985,1,15],  name:"Danaher"},
-    DRI:  {date:[1995,5,10],  name:"Darden Restaurants"},
-    DVA:  {date:[1995,11,1],  name:"DaVita"},
-    DAY:  {date:[2024,3,26],  name:"Dayforce"},
-    DE:   {date:[1978,6,15],  name:"Deere & Co"},
-    DAL:  {date:[2007,5,3],   name:"Delta Air Lines"},
-    DVN:  {date:[1988,9,1],   name:"Devon Energy"},
-    DXCM: {date:[2005,4,28],  name:"Dexcom"},
-    FANG: {date:[2012,10,11], name:"Diamondback Energy"},
-    DLR:  {date:[2004,11,3],  name:"Digital Realty"},
-    DFS:  {date:[2007,6,12],  name:"Discover Financial"},
-    DIS:  {date:[1957,11,12], name:"Disney"},
-    DG:   {date:[2009,11,13], name:"Dollar General"},
-    DLTR: {date:[1995,3,6],   name:"Dollar Tree"},
-    D:    {date:[1983,11,1],  name:"Dominion Energy"},
-    DPZ:  {date:[2004,7,13],  name:"Domino's Pizza"},
-    DOV:  {date:[1955,3,1],   name:"Dover Corp"},
-    DOW:  {date:[2019,4,2],   name:"Dow Inc"},
-    DTE:  {date:[1947,1,2],   name:"DTE Energy"},
-    DD:   {date:[2019,6,3],   name:"DuPont"},
-    DUK:  {date:[1904,5,1],   name:"Duke Energy"},
-    DRE:  {date:[1993,2,1],   name:"Duke Realty"},
-    DXC:  {date:[2017,4,3],   name:"DXC Technology"},
-    EMN:  {date:[1994,1,3],   name:"Eastman Chemical"},
-    ETN:  {date:[1916,11,1],  name:"Eaton"},
-    EBAY: {date:[1998,9,24],  name:"eBay"},
-    ECL:  {date:[1957,4,1],   name:"Ecolab"},
-    EIX:  {date:[1909,1,2],   name:"Edison Intl"},
-    EW:   {date:[1970,10,1],  name:"Edwards Lifesciences"},
-    EA:   {date:[1989,5,1],   name:"Electronic Arts"},
-    ELV:  {date:[2004,11,1],  name:"Elevance Health"},
-    LLY:  {date:[1952,7,22],  name:"Eli Lilly"},
-    EMR:  {date:[1956,11,1],  name:"Emerson Electric"},
-    ENPH: {date:[2012,3,30],  name:"Enphase Energy"},
-    ETR:  {date:[1968,1,2],   name:"Entergy"},
-    EOG:  {date:[1999,8,26],  name:"EOG Resources"},
-    EPAM: {date:[2012,2,9],   name:"EPAM Systems"},
-    EQT:  {date:[1926,1,2],   name:"EQT Corp"},
-    EFX:  {date:[1965,3,1],   name:"Equifax"},
-    EQIX: {date:[2000,8,16],  name:"Equinix"},
-    EQR:  {date:[1993,8,18],  name:"Equity Residential"},
-    WELL: {date:[1992,5,1],   name:"Welltower"},
-    ES:   {date:[1947,4,1],   name:"Eversource Energy"},
-    EXC:  {date:[1994,1,3],   name:"Exelon"},
-    EXPE: {date:[1999,11,8],  name:"Expedia"},
-    EXPD: {date:[1984,7,1],   name:"Expeditors Intl"},
-    EXR:  {date:[2004,8,17],  name:"Extra Space Storage"},
-    XOM:  {date:[1920,3,1],   name:"ExxonMobil"},
-    FFIV: {date:[1999,6,4],   name:"F5 Inc"},
-    FDS:  {date:[1996,7,31],  name:"FactSet Research"},
-    FICO: {date:[1987,6,1],   name:"FICO"},
-    FAST: {date:[1987,8,21],  name:"Fastenal"},
-    FRT:  {date:[1962,11,1],  name:"Federal Realty"},
-    FDX:  {date:[1978,4,12],  name:"FedEx"},
-    FIS:  {date:[2001,2,1],   name:"Fidelity Natl Info"},
-    FITB: {date:[1975,4,1],   name:"Fifth Third Bancorp"},
-    GEHC: {date:[2023,1,4],   name:"GE HealthCare"},
-    GPC:  {date:[1928,3,1],   name:"Genuine Parts"},
-    GILD: {date:[1992,1,22],  name:"Gilead Sciences"},
-    GIS:  {date:[1928,7,2],   name:"General Mills"},
-    GM:   {date:[2010,11,18], name:"General Motors"},
-    GWW:  {date:[1967,4,1],   name:"WW Grainger"},
-    HAL:  {date:[1948,1,2],   name:"Halliburton"},
-    HIG:  {date:[1995,3,23],  name:"Hartford Financial"},
-    HAS:  {date:[1968,8,1],   name:"Hasbro"},
-    HCA:  {date:[1992,3,4],   name:"HCA Healthcare"},
-    PEAK: {date:[1985,5,1],   name:"Healthpeak"},
-    HSIC: {date:[1995,11,3],  name:"Henry Schein"},
-    HSY:  {date:[1927,9,1],   name:"Hershey"},
-    HES:  {date:[1969,1,2],   name:"Hess Corp"},
-    HPE:  {date:[2015,11,2],  name:"HP Enterprise"},
-    HPQ:  {date:[1961,3,1],   name:"HP Inc"},
-    HOLX: {date:[1990,5,1],   name:"Hologic"},
-    HD:   {date:[1981,9,22],  name:"Home Depot"},
-    HON:  {date:[1914,4,15],  name:"Honeywell"},
-    HRL:  {date:[1927,9,1],   name:"Hormel Foods"},
-    HST:  {date:[1998,1,12],  name:"Host Hotels"},
-    HWM:  {date:[2016,11,1],  name:"Howmet Aerospace"},
-    HUM:  {date:[1961,6,15],  name:"Humana"},
-    HBAN: {date:[1983,11,1],  name:"Huntington Bancshares"},
-    HII:  {date:[2011,3,31],  name:"Huntington Ingalls"},
-    IBM:  {date:[1915,11,11], name:"IBM"},
-    IEX:  {date:[2001,3,15],  name:"IDEX Corp"},
-    IDXX: {date:[1991,6,12],  name:"IDEXX Labs"},
-    ITW:  {date:[1967,3,1],   name:"Illinois Tool Works"},
-    INCY: {date:[1993,11,18], name:"Incyte"},
-    IR:   {date:[2020,3,2],   name:"Ingersoll Rand"},
-    PODD: {date:[2007,5,11],  name:"Insulet"},
-    ICE:  {date:[2005,11,16], name:"Intercontinental Exch"},
-    IFF:  {date:[1951,9,1],   name:"Intl Flavors"},
-    IP:   {date:[1936,1,2],   name:"Intl Paper"},
-    IPG:  {date:[1969,5,1],   name:"Interpublic Group"},
-    INTU: {date:[1993,3,12],  name:"Intuit"},
-    ISRG: {date:[2000,6,7],   name:"Intuitive Surgical"},
-    IVZ:  {date:[2000,2,3],   name:"Invesco"},
-    INVH: {date:[2017,2,1],   name:"Invitation Homes"},
-    IQV:  {date:[2014,5,9],   name:"IQVIA Holdings"},
-    IRM:  {date:[1996,2,7],   name:"Iron Mountain"},
-    // ── Final Batch: Complete S&P 500 ────────────────────────────────────────
-    K:    {date:[1925,3,2],   name:"Kellanova"},
-    KEY:  {date:[1972,3,1],   name:"KeyCorp"},
-    KHC:  {date:[2015,7,6],   name:"Kraft Heinz"},
-    KIM:  {date:[1991,11,1],  name:"Kimco Realty"},
-    KMB:  {date:[1928,10,1],  name:"Kimberly-Clark"},
-    KR:   {date:[1928,3,1],   name:"Kroger"},
-    L:    {date:[1956,4,1],   name:"Loews Corp"},
-    LEN:  {date:[1971,1,1],   name:"Lennar"},
-    LHX:  {date:[2019,3,1],   name:"L3Harris Tech"},
-    LKQ:  {date:[2003,10,3],  name:"LKQ Corp"},
-    LUV:  {date:[1977,6,8],   name:"Southwest Airlines"},
-    LVS:  {date:[2004,12,14], name:"Las Vegas Sands"},
-    LYB:  {date:[2010,10,14], name:"LyondellBasell"},
-    LYV:  {date:[2005,2,14],  name:"Live Nation"},
-    MAA:  {date:[1994,2,4],   name:"Mid-America Apartment"},
-    MAS:  {date:[1955,1,2],   name:"Masco Corp"},
-    MCHP: {date:[1993,3,23],  name:"Microchip Technology"},
-    MCK:  {date:[1994,10,24], name:"McKesson"},
-    MCO:  {date:[2000,10,3],  name:"Moody's"},
-    MDLZ: {date:[2012,10,1],  name:"Mondelez Intl"},
-    MET:  {date:[2000,4,5],   name:"MetLife"},
-    MGM:  {date:[2011,2,10],  name:"MGM Resorts"},
-    MHK:  {date:[1992,4,1],   name:"Mohawk Industries"},
-    MKC:  {date:[1933,9,1],   name:"McCormick"},
-    MNST: {date:[1995,6,14],  name:"Monster Beverage"},
-    MOH:  {date:[2003,12,18], name:"Molina Healthcare"},
-    MOS:  {date:[2004,10,22], name:"Mosaic Co"},
-    MPWR: {date:[2004,11,4],  name:"Monolithic Power"},
-    MRK:  {date:[1946,6,1],   name:"Merck"},
-    MSCI: {date:[2007,11,15], name:"MSCI Inc"},
-    MSI:  {date:[1969,9,1],   name:"Motorola Solutions"},
-    MTB:  {date:[1983,4,1],   name:"M&T Bank"},
-    MTD:  {date:[1997,10,28], name:"Mettler-Toledo"},
-    NCLH: {date:[2013,1,18],  name:"Norwegian Cruise"},
-    NEM:  {date:[1936,6,15],  name:"Newmont"},
-    NI:   {date:[1912,1,2],   name:"NiSource"},
-    NOC:  {date:[1994,4,18],  name:"Northrop Grumman"},
-    NRG:  {date:[2003,12,5],  name:"NRG Energy"},
-    NSC:  {date:[1982,6,1],   name:"Norfolk Southern"},
-    NTAP: {date:[1995,11,21], name:"NetApp"},
-    NTRS: {date:[1971,8,1],   name:"Northern Trust"},
-    NVR:  {date:[1993,4,9],   name:"NVR Inc"},
-    O:    {date:[1994,10,18], name:"Realty Income"},
-    ODFL: {date:[1991,9,19],  name:"Old Dominion Freight"},
-    OKE:  {date:[1997,5,1],   name:"ONEOK"},
-    OMC:  {date:[1986,5,1],   name:"Omnicom Group"},
-    ON:   {date:[2000,5,10],  name:"ON Semiconductor"},
-    ORLY: {date:[1993,4,22],  name:"O'Reilly Automotive"},
-    PAYC: {date:[2014,4,15],  name:"Paycom"},
-    PAYX: {date:[1983,7,1],   name:"Paychex"},
-    PCAR: {date:[1955,3,1],   name:"PACCAR"},
-    PEG:  {date:[1947,4,1],   name:"PSEG"},
-    PFG:  {date:[2001,10,22], name:"Principal Financial"},
-    PHM:  {date:[1972,3,1],   name:"PulteGroup"},
-    PKG:  {date:[2000,1,28],  name:"Packaging Corp"},
-    PNC:  {date:[1972,4,1],   name:"PNC Financial"},
-    PNR:  {date:[1966,5,1],   name:"Pentair"},
-    PNW:  {date:[1947,1,2],   name:"Pinnacle West"},
-    POOL: {date:[1995,10,31], name:"Pool Corp"},
-    PPL:  {date:[1946,3,1],   name:"PPL Corp"},
-    PSA:  {date:[1984,10,1],  name:"Public Storage"},
-    PTC:  {date:[1989,5,26],  name:"PTC Inc"},
-    QRVO: {date:[2015,1,2],   name:"Qorvo"},
-    REG:  {date:[1963,6,1],   name:"Regency Centers"},
-    RF:   {date:[1971,8,1],   name:"Regions Financial"},
-    RHI:  {date:[1978,9,1],   name:"Robert Half"},
-    RJF:  {date:[1983,3,1],   name:"Raymond James"},
-    RMD:  {date:[1995,6,1],   name:"ResMed"},
-    ROL:  {date:[1967,6,1],   name:"Rollins"},
-    ROST: {date:[1985,8,23],  name:"Ross Stores"},
-    RSG:  {date:[1998,12,14], name:"Republic Services"},
-    SBAC: {date:[1999,6,16],  name:"SBA Communications"},
-    SJM:  {date:[1959,1,2],   name:"JM Smucker"},
-    SNA:  {date:[1930,6,1],   name:"Snap-on"},
-    SRE:  {date:[1998,6,26],  name:"Sempra"},
-    STX:  {date:[2002,4,18],  name:"Seagate Tech"},
-    SWK:  {date:[1966,11,1],  name:"Stanley Black & Decker"},
-    SYF:  {date:[2014,7,25],  name:"Synchrony Financial"},
-    SYK:  {date:[1979,9,1],   name:"Stryker"},
-    SYY:  {date:[1970,8,1],   name:"Sysco"},
-    TAP:  {date:[1993,8,1],   name:"Molson Coors"},
-    TDG:  {date:[2006,3,16],  name:"TransDigm"},
-    TDY:  {date:[1999,11,19], name:"Teledyne Tech"},
-    TEL:  {date:[2007,6,29],  name:"TE Connectivity"},
-    TER:  {date:[1978,10,1],  name:"Teradyne"},
-    TFX:  {date:[1996,2,14],  name:"Teleflex"},
-    TRMB: {date:[1990,9,1],   name:"Trimble"},
-    TSCO: {date:[1994,2,1],   name:"Tractor Supply"},
-    TSN:  {date:[1963,6,1],   name:"Tyson Foods"},
-    TTWO: {date:[1993,4,15],  name:"Take-Two Interactive"},
-    TXT:  {date:[1966,4,1],   name:"Textron"},
-    TYL:  {date:[1997,6,12],  name:"Tyler Technologies"},
-    UDR:  {date:[1972,8,1],   name:"UDR Inc"},
-    UHS:  {date:[1981,10,1],  name:"Universal Health Svcs"},
-    UNP:  {date:[1969,3,1],   name:"Union Pacific"},
-    UPS:  {date:[1999,11,10], name:"UPS"},
-    URI:  {date:[1997,12,12], name:"United Rentals"},
-    USB:  {date:[1929,1,2],   name:"US Bancorp"},
-    VFC:  {date:[1966,11,1],  name:"VF Corp"},
-    VLTO: {date:[2023,9,29],  name:"Veralto"},
-    VNO:  {date:[1993,8,1],   name:"Vornado Realty"},
-    VRSK: {date:[2009,10,7],  name:"Verisk Analytics"},
-    VRSN: {date:[1998,1,30],  name:"VeriSign"},
-    VTR:  {date:[1999,2,1],   name:"Ventas"},
-    VTRS: {date:[2020,11,16], name:"Viatris"},
-    WAB:  {date:[1995,4,19],  name:"Westinghouse Air Brake"},
-    WAT:  {date:[1994,11,18], name:"Waters Corp"},
-    WBA:  {date:[1927,4,1],   name:"Walgreens Boots"},
-    WDC:  {date:[1993,11,1],  name:"Western Digital"},
-    WEC:  {date:[1947,1,2],   name:"WEC Energy"},
-    WHR:  {date:[1949,2,1],   name:"Whirlpool"},
-    WM:   {date:[1971,6,1],   name:"Waste Management"},
-    WMB:  {date:[1975,3,1],   name:"Williams Companies"},
-    WRK:  {date:[2015,7,1],   name:"WestRock"},
-    WST:  {date:[1985,8,1],   name:"West Pharmaceutical"},
-    WY:   {date:[1946,9,1],   name:"Weyerhaeuser"},
-    WYNN: {date:[2002,10,25], name:"Wynn Resorts"},
-    XEL:  {date:[1947,1,2],   name:"Xcel Energy"},
-    ZBRA: {date:[1991,11,8],  name:"Zebra Technologies"},
-    ZTS:  {date:[2013,2,1],   name:"Zoetis"},
+    AAPL:{date:[1980,12,12],name:"Apple"},MSFT:{date:[1986,3,13],name:"Microsoft"},
+    NVDA:{date:[1999,1,22],name:"Nvidia"},AMZN:{date:[1997,5,15],name:"Amazon"},
+    GOOGL:{date:[2004,8,19],name:"Alphabet"},META:{date:[2012,5,18],name:"Meta"},
+    TSLA:{date:[2010,6,29],name:"Tesla"},NFLX:{date:[2002,5,23],name:"Netflix"},
+    BRKB:{date:[1996,5,9],name:"Berkshire B"},JPM:{date:[1969,1,2],name:"JPMorgan"},
+    AMD:{date:[1979,9,27],name:"AMD"},INTC:{date:[1971,10,13],name:"Intel"},
+    CRM:{date:[2004,6,23],name:"Salesforce"},ORCL:{date:[1986,3,12],name:"Oracle"},
+    CSCO:{date:[1990,2,16],name:"Cisco"},ADBE:{date:[1986,8,20],name:"Adobe"},
+    PYPL:{date:[2015,7,20],name:"PayPal"},SQ:{date:[2015,11,19],name:"Block"},
+    UBER:{date:[2019,5,10],name:"Uber"},ABNB:{date:[2020,12,10],name:"Airbnb"},
+    SNOW:{date:[2020,9,16],name:"Snowflake"},PLTR:{date:[2020,9,30],name:"Palantir"},
+    COIN:{date:[2021,4,14],name:"Coinbase"},GS:{date:[1999,5,4],name:"Goldman Sachs"},
+    BAC:{date:[1972,1,3],name:"Bank of America"},WFC:{date:[1970,1,2],name:"Wells Fargo"},
+    MS:{date:[1986,3,21],name:"Morgan Stanley"},V:{date:[2008,3,19],name:"Visa"},
+    MA:{date:[2006,5,25],name:"Mastercard"},NKE:{date:[1980,12,2],name:"Nike"},
+    SBUX:{date:[1992,6,26],name:"Starbucks"},MCD:{date:[1966,4,21],name:"McDonald's"},
+    KO:{date:[1919,9,5],name:"Coca-Cola"},PEP:{date:[1972,6,1],name:"PepsiCo"},
+    WMT:{date:[1972,8,25],name:"Walmart"},TGT:{date:[1967,2,8],name:"Target"},
+    AMGN:{date:[1983,6,17],name:"Amgen"},JNJ:{date:[1944,9,25],name:"J&J"},
+    PFE:{date:[1944,1,3],name:"Pfizer"},MRNA:{date:[2018,12,6],name:"Moderna"},
+    UNH:{date:[1984,10,17],name:"UnitedHealth"},XOM:{date:[1920,3,1],name:"ExxonMobil"},
+    CVX:{date:[1925,1,2],name:"Chevron"},SPY:{date:[1993,1,22],name:"S&P 500 ETF"},
+    QQQ:{date:[1999,3,10],name:"Nasdaq ETF"},IWM:{date:[2000,5,22],name:"Russell 2000"},
+    GLD:{date:[2004,11,18],name:"Gold ETF"},MARA:{date:[2012,6,26],name:"Marathon Digital"},
+    MSTR:{date:[1998,6,11],name:"MicroStrategy"},SOFI:{date:[2021,6,1],name:"SoFi"},
+    RIVN:{date:[2021,11,10],name:"Rivian"},BABA:{date:[2014,9,19],name:"Alibaba"},
+    COST:{date:[1985,12,5],name:"Costco"},HD:{date:[1981,9,22],name:"Home Depot"},
+    LOW:{date:[1961,10,10],name:"Lowe's"},TJX:{date:[1987,1,23],name:"TJX"},
+    DIS:{date:[1957,11,12],name:"Disney"},BA:{date:[1934,9,5],name:"Boeing"},
+    GE:{date:[1892,1,2],name:"GE Aerospace"},MMM:{date:[1916,8,8],name:"3M"},
+    CAT:{date:[1929,12,2],name:"Caterpillar"},HON:{date:[1914,4,15],name:"Honeywell"},
+    LMT:{date:[1995,3,15],name:"Lockheed Martin"},RTX:{date:[1934,9,5],name:"RTX"},
+    DE:{date:[1978,6,15],name:"Deere & Co"},ABBV:{date:[2013,1,2],name:"AbbVie"},
+    LLY:{date:[1952,7,22],name:"Eli Lilly"},TMO:{date:[1980,7,15],name:"Thermo Fisher"},
+    MDT:{date:[1960,10,11],name:"Medtronic"},ISRG:{date:[2000,6,7],name:"Intuitive Surgical"},
+    REGN:{date:[1991,4,4],name:"Regeneron"},BLK:{date:[1999,10,1],name:"BlackRock"},
+    AXP:{date:[1977,5,2],name:"American Express"},C:{date:[1986,6,3],name:"Citigroup"},
+    IBM:{date:[1915,11,11],name:"IBM"},QCOM:{date:[1991,12,13],name:"Qualcomm"},
+    AVGO:{date:[2009,8,6],name:"Broadcom"},MU:{date:[1984,10,5],name:"Micron"},
+    NOW:{date:[2012,6,29],name:"ServiceNow"},PANW:{date:[2012,7,20],name:"Palo Alto"},
+    CRWD:{date:[2019,6,12],name:"CrowdStrike"},T:{date:[1984,1,2],name:"AT&T"},
+    VZ:{date:[1983,11,21],name:"Verizon"},TMUS:{date:[2007,7,2],name:"T-Mobile"},
+    SPOT:{date:[2018,4,3],name:"Spotify"},SNAP:{date:[2017,3,2],name:"Snap"},
+    SPGI:{date:[1966,5,2],name:"S&P Global"},CME:{date:[2002,12,6],name:"CME Group"},
+    CVS:{date:[1972,1,3],name:"CVS Health"},CI:{date:[1974,3,7],name:"Cigna"},
+    AMT:{date:[1998,6,4],name:"American Tower"},PLD:{date:[1997,11,20],name:"Prologis"},
+    PG:{date:[1890,1,2],name:"Procter & Gamble"},PM:{date:[2008,3,31],name:"Philip Morris"},
+    MO:{date:[1928,1,2],name:"Altria"},F:{date:[1956,2,24],name:"Ford"},
+    GM:{date:[2010,11,18],name:"General Motors"},DAL:{date:[2007,5,3],name:"Delta"},
+    MAR:{date:[1998,10,8],name:"Marriott"},HLT:{date:[2013,12,12],name:"Hilton"},
+    FTNT:{date:[2009,11,18],name:"Fortinet"},ACN:{date:[2001,7,19],name:"Accenture"},
+    INTU:{date:[1993,3,12],name:"Intuit"},ANET:{date:[2014,6,6],name:"Arista Networks"},
+    TTD:{date:[2016,9,21],name:"Trade Desk"},DASH:{date:[2020,12,9],name:"DoorDash"},
+    APP:{date:[2018,9,18],name:"AppLovin"},AFRM:{date:[2021,1,13],name:"Affirm"},
+    SMCI:{date:[2007,3,29],name:"Super Micro"},ARM:{date:[2023,9,14],name:"ARM"},
+    ASML:{date:[1995,3,6],name:"ASML"},TSM:{date:[1994,10,13],name:"TSMC"},
+    SHOP:{date:[2015,5,21],name:"Shopify"},MELI:{date:[2007,8,10],name:"MercadoLibre"},
+    NET:{date:[2019,9,13],name:"Cloudflare"},ZM:{date:[2019,4,18],name:"Zoom"},
+    AXON:{date:[2001,5,9],name:"Axon Enterprise"},DKNG:{date:[2020,4,24],name:"DraftKings"},
+    BKNG:{date:[1999,3,30],name:"Booking Holdings"},LULU:{date:[2007,7,27],name:"Lululemon"},
+    RL:{date:[1997,6,12],name:"Ralph Lauren"},RCL:{date:[1993,4,10],name:"Royal Caribbean"},
+    GILD:{date:[1992,1,22],name:"Gilead Sciences"},BIIB:{date:[1991,3,6],name:"Biogen"},
+    CB:{date:[1985,5,1],name:"Chubb"},AON:{date:[1982,9,1],name:"Aon"},
+    COP:{date:[2002,4,16],name:"ConocoPhillips"},EOG:{date:[1999,8,26],name:"EOG Resources"},
+    OXY:{date:[1964,4,1],name:"Occidental"},HAL:{date:[1948,1,2],name:"Halliburton"},
+    NEE:{date:[1984,6,1],name:"NextEra Energy"},DUK:{date:[1904,5,1],name:"Duke Energy"},
+    CMG:{date:[2006,1,26],name:"Chipotle"},YUM:{date:[1997,10,7],name:"Yum Brands"},
+    LIN:{date:[1992,7,1],name:"Linde"},SHW:{date:[1964,11,1],name:"Sherwin-Williams"},
+    MRK:{date:[1946,6,1],name:"Merck"},NSC:{date:[1982,6,1],name:"Norfolk Southern"},
+    UNP:{date:[1969,3,1],name:"Union Pacific"},UPS:{date:[1999,11,10],name:"UPS"},
+    FDX:{date:[1978,4,12],name:"FedEx"},ABT:{date:[1929,11,1],name:"Abbott Labs"},
+    SYK:{date:[1979,9,1],name:"Stryker"},ZTS:{date:[2013,2,1],name:"Zoetis"},
+    ROST:{date:[1985,8,23],name:"Ross Stores"},ORLY:{date:[1993,4,22],name:"O'Reilly Auto"},
+    PAYX:{date:[1983,7,1],name:"Paychex"},TDG:{date:[2006,3,16],name:"TransDigm"},
+    ODFL:{date:[1991,9,19],name:"Old Dominion"},O:{date:[1994,10,18],name:"Realty Income"},
+    PSA:{date:[1984,10,1],name:"Public Storage"},WM:{date:[1971,6,1],name:"Waste Mgmt"},
+    RSG:{date:[1998,12,14],name:"Republic Services"},CTAS:{date:[1983,6,21],name:"Cintas"},
+    URI:{date:[1997,12,12],name:"United Rentals"},FAST:{date:[1987,8,21],name:"Fastenal"},
+    GWW:{date:[1967,4,1],name:"WW Grainger"},TSCO:{date:[1994,2,1],name:"Tractor Supply"},
+    ECL:{date:[1957,4,1],name:"Ecolab"},SYY:{date:[1970,8,1],name:"Sysco"},
+    MCK:{date:[1994,10,24],name:"McKesson"},CAH:{date:[1983,8,1],name:"Cardinal Health"},
+    MSCI:{date:[2007,11,15],name:"MSCI"},VRSK:{date:[2009,10,7],name:"Verisk"},
+    COF:{date:[1994,11,16],name:"Capital One"},AIG:{date:[1969,5,1],name:"AIG"},
+    PRU:{date:[2001,12,13],name:"Prudential"},MET:{date:[2000,4,5],name:"MetLife"},
+    HIG:{date:[1995,3,23],name:"Hartford Financial"},ALL:{date:[1993,6,2],name:"Allstate"},
+    PNC:{date:[1972,4,1],name:"PNC Financial"},USB:{date:[1929,1,2],name:"US Bancorp"},
+    KEY:{date:[1972,3,1],name:"KeyCorp"},CFG:{date:[2014,9,24],name:"Citizens Financial"},
+    FITB:{date:[1975,4,1],name:"Fifth Third"},HBAN:{date:[1983,11,1],name:"Huntington"},
+    MTB:{date:[1983,4,1],name:"M&T Bank"},STT:{date:[1967,3,1],name:"State Street"},
+    BK:{date:[1993,1,4],name:"BNY Mellon"},TROW:{date:[1986,4,8],name:"T Rowe Price"},
+    BX:{date:[2007,6,22],name:"Blackstone"},KKR:{date:[2010,7,15],name:"KKR"},
+    APO:{date:[2011,3,29],name:"Apollo Global"},SCHW:{date:[1987,9,22],name:"Schwab"},
+    KHC:{date:[2015,7,6],name:"Kraft Heinz"},MDLZ:{date:[2012,10,1],name:"Mondelez"},
+    HSY:{date:[1927,9,1],name:"Hershey"},GIS:{date:[1928,7,2],name:"General Mills"},
+    K:{date:[1925,3,2],name:"Kellanova"},TSN:{date:[1963,6,1],name:"Tyson Foods"},
+    CAG:{date:[1983,9,1],name:"ConAgra"},HRL:{date:[1927,9,1],name:"Hormel"},
+    MKC:{date:[1933,9,1],name:"McCormick"},SJM:{date:[1959,1,2],name:"JM Smucker"},
+    KMB:{date:[1928,10,1],name:"Kimberly-Clark"},CL:{date:[1923,9,25],name:"Colgate"},
+    CHD:{date:[1981,1,2],name:"Church & Dwight"},CLX:{date:[1969,5,1],name:"Clorox"},
+    MNST:{date:[1995,6,14],name:"Monster Beverage"},STZ:{date:[1972,11,1],name:"Constellation Brands"},
+    TAP:{date:[1993,8,1],name:"Molson Coors"},KR:{date:[1928,3,1],name:"Kroger"},
+    AZO:{date:[1991,11,18],name:"AutoZone"},KMX:{date:[2002,2,1],name:"CarMax"},
+    BBWI:{date:[1995,3,6],name:"Bath & Body Works"},PVH:{date:[1987,5,1],name:"PVH Corp"},
+    VFC:{date:[1966,11,1],name:"VF Corp"},TPR:{date:[2000,10,11],name:"Tapestry"},
+    DECK:{date:[1993,10,14],name:"Deckers"},LULU:{date:[2007,7,27],name:"Lululemon"},
+    NVR:{date:[1993,4,9],name:"NVR Inc"},PHM:{date:[1972,3,1],name:"PulteGroup"},
+    LEN:{date:[1971,1,1],name:"Lennar"},DHI:{date:[1992,6,12],name:"DR Horton"},
+    TOL:{date:[1986,5,12],name:"Toll Brothers"},ITW:{date:[1967,3,1],name:"Illinois Tool"},
+    PH:{date:[1938,1,2],name:"Parker Hannifin"},EMR:{date:[1956,11,1],name:"Emerson"},
+    ROK:{date:[1990,9,1],name:"Rockwell Automation"},ETN:{date:[1916,11,1],name:"Eaton"},
+    DOV:{date:[1955,3,1],name:"Dover Corp"},AME:{date:[1930,1,2],name:"AMETEK"},
+    ROP:{date:[1992,11,3],name:"Roper Tech"},XYL:{date:[2011,10,31],name:"Xylem"},
+    IR:{date:[2020,3,2],name:"Ingersoll Rand"},CARR:{date:[2020,4,3],name:"Carrier"},
+    OTIS:{date:[2020,4,3],name:"Otis Worldwide"},TT:{date:[1925,1,2],name:"Trane Tech"},
+    JCI:{date:[1978,5,1],name:"Johnson Controls"},GEHC:{date:[2023,1,4],name:"GE HealthCare"},
+    BAX:{date:[1952,1,2],name:"Baxter"},BDX:{date:[1926,5,1],name:"Becton Dickinson"},
+    BSX:{date:[1992,5,18],name:"Boston Scientific"},EW:{date:[1970,10,1],name:"Edwards Lifesciences"},
+    HOLX:{date:[1990,5,1],name:"Hologic"},DXCM:{date:[2005,4,28],name:"Dexcom"},
+    PODD:{date:[2007,5,11],name:"Insulet"},ALGN:{date:[2001,5,25],name:"Align Tech"},
+    IDXX:{date:[1991,6,12],name:"IDEXX Labs"},IQV:{date:[2014,5,9],name:"IQVIA"},
+    CRL:{date:[2000,6,27],name:"Charles River Labs"},TECH:{date:[1997,12,3],name:"Bio-Techne"},
+    MTD:{date:[1997,10,28],name:"Mettler-Toledo"},WAT:{date:[1994,11,18],name:"Waters Corp"},
+    A:{date:[1999,11,18],name:"Agilent Tech"},ZBH:{date:[2001,8,7],name:"Zimmer Biomet"},
+    INCY:{date:[1993,11,18],name:"Incyte"},VRTX:{date:[1991,7,26],name:"Vertex Pharma"},
+    EXAS:{date:[2001,2,8],name:"Exact Sciences"},RMD:{date:[1995,6,1],name:"ResMed"},
+    ENPH:{date:[2012,3,30],name:"Enphase Energy"},SEDG:{date:[2015,3,26],name:"SolarEdge"},
+    NEE:{date:[1984,6,1],name:"NextEra Energy"},AES:{date:[1991,6,12],name:"AES Corp"},
+    CEG:{date:[2022,2,2],name:"Constellation Energy"},PCG:{date:[1912,10,1],name:"PG&E"},
+    EXC:{date:[1994,1,3],name:"Exelon"},SO:{date:[1949,11,1],name:"Southern Company"},
+    DUK:{date:[1904,5,1],name:"Duke Energy"},AEP:{date:[1947,1,2],name:"American Elec Power"},
+    D:{date:[1983,11,1],name:"Dominion Energy"},ED:{date:[1936,5,1],name:"Con Edison"},
+    SRE:{date:[1998,6,26],name:"Sempra"},WEC:{date:[1947,1,2],name:"WEC Energy"},
+    XEL:{date:[1947,1,2],name:"Xcel Energy"},DTE:{date:[1947,1,2],name:"DTE Energy"},
+    PPL:{date:[1946,3,1],name:"PPL Corp"},CMS:{date:[1987,3,1],name:"CMS Energy"},
+    ETR:{date:[1968,1,2],name:"Entergy"},EIX:{date:[1909,1,2],name:"Edison Intl"},
+    NRG:{date:[2003,12,5],name:"NRG Energy"},OKE:{date:[1997,5,1],name:"ONEOK"},
+    WMB:{date:[1975,3,1],name:"Williams Companies"},KMI:{date:[2012,2,10],name:"Kinder Morgan"},
+    LIN:{date:[1992,7,1],name:"Linde"},APD:{date:[1961,7,1],name:"Air Products"},
+    PPG:{date:[1899,1,2],name:"PPG Industries"},NUE:{date:[1968,6,1],name:"Nucor"},
+    STLD:{date:[1996,11,21],name:"Steel Dynamics"},FCX:{date:[1995,7,18],name:"Freeport-McMoRan"},
+    NEM:{date:[1936,6,15],name:"Newmont"},ALB:{date:[1994,2,28],name:"Albemarle"},
+    MOS:{date:[2004,10,22],name:"Mosaic Co"},CF:{date:[2005,8,10],name:"CF Industries"},
+    FMC:{date:[1978,6,1],name:"FMC Corp"},VMC:{date:[1956,3,1],name:"Vulcan Materials"},
+    MLM:{date:[1994,2,28],name:"Martin Marietta"},SLB:{date:[1962,11,15],name:"SLB"},
+    BKR:{date:[2017,7,3],name:"Baker Hughes"},HAL:{date:[1948,1,2],name:"Halliburton"},
+    CTRA:{date:[2020,10,1],name:"Coterra Energy"},DVN:{date:[1988,9,1],name:"Devon Energy"},
+    FANG:{date:[2012,10,11],name:"Diamondback Energy"},PXD:{date:[1997,8,7],name:"Pioneer Natural"},
+    APA:{date:[1969,1,2],name:"APA Corp"},MPC:{date:[2011,6,23],name:"Marathon Petroleum"},
+    VLO:{date:[1981,10,1],name:"Valero Energy"},PSX:{date:[2012,4,30],name:"Phillips 66"},
+    HES:{date:[1969,1,2],name:"Hess Corp"},
+    // ── Extended S&P 500 Batch ────────────────────────────────────────────────
+    GILD:{date:[1992,1,22],name:"Gilead Sciences"},BIIB:{date:[1991,3,6],name:"Biogen"},
+    IDXX:{date:[1991,6,12],name:"IDEXX Labs"},MTD:{date:[1997,10,28],name:"Mettler-Toledo"},
+    EW:{date:[1970,10,1],name:"Edwards Lifesciences"},STE:{date:[1992,11,3],name:"Steris"},
+    BAX:{date:[1952,1,2],name:"Baxter"},BDX:{date:[1926,5,1],name:"Becton Dickinson"},
+    ZBH:{date:[2001,8,7],name:"Zimmer Biomet"},HOLX:{date:[1990,5,1],name:"Hologic"},
+    ALGN:{date:[2001,5,25],name:"Align Technology"},DXCM:{date:[2005,4,28],name:"Dexcom"},
+    PODD:{date:[2007,5,11],name:"Insulet"},INCY:{date:[1993,11,18],name:"Incyte"},
+    EXAS:{date:[2001,2,8],name:"Exact Sciences"},RMD:{date:[1995,6,1],name:"ResMed"},
+    CB:{date:[1985,5,1],name:"Chubb"},AON:{date:[1982,9,1],name:"Aon"},
+    MMC:{date:[1962,3,1],name:"Marsh McLennan"},TRV:{date:[1864,1,2],name:"Travelers"},
+    ALL:{date:[1993,6,2],name:"Allstate"},PRU:{date:[2001,12,13],name:"Prudential"},
+    AFL:{date:[1974,2,5],name:"Aflac"},STT:{date:[1967,3,1],name:"State Street"},
+    BK:{date:[1993,1,4],name:"BNY Mellon"},TROW:{date:[1986,4,8],name:"T Rowe Price"},
+    IVZ:{date:[2000,2,3],name:"Invesco"},COP:{date:[2002,4,16],name:"ConocoPhillips"},
+    EOG:{date:[1999,8,26],name:"EOG Resources"},MPC:{date:[2011,6,23],name:"Marathon Petroleum"},
+    VLO:{date:[1981,10,1],name:"Valero Energy"},PSX:{date:[2012,4,30],name:"Phillips 66"},
+    BKR:{date:[2017,7,3],name:"Baker Hughes"},HAL:{date:[1948,1,2],name:"Halliburton"},
+    NEE:{date:[1984,6,1],name:"NextEra Energy"},DUK:{date:[1904,5,1],name:"Duke Energy"},
+    SO:{date:[1949,11,1],name:"Southern Company"},AEP:{date:[1947,1,2],name:"American Elec Power"},
+    EXC:{date:[1994,1,3],name:"Exelon"},CMG:{date:[2006,1,26],name:"Chipotle"},
+    DPZ:{date:[2004,7,13],name:"Domino's Pizza"},YUM:{date:[1997,10,7],name:"Yum Brands"},
+    WING:{date:[2015,10,29],name:"Wingstop"},SHAK:{date:[2015,1,30],name:"Shake Shack"},
+    LIN:{date:[1992,7,1],name:"Linde"},APD:{date:[1961,7,1],name:"Air Products"},
+    ECL:{date:[1957,4,1],name:"Ecolab"},PPG:{date:[1899,1,2],name:"PPG Industries"},
+    SHW:{date:[1964,11,1],name:"Sherwin-Williams"},VMC:{date:[1956,3,1],name:"Vulcan Materials"},
+    MLM:{date:[1994,2,28],name:"Martin Marietta"},NUE:{date:[1968,6,1],name:"Nucor"},
+    STLD:{date:[1996,11,21],name:"Steel Dynamics"},FCX:{date:[1995,7,18],name:"Freeport-McMoRan"},
+    NEM:{date:[1936,6,15],name:"Newmont"},T:{date:[1984,1,2],name:"AT&T"},
+    VZ:{date:[1983,11,21],name:"Verizon"},TMUS:{date:[2007,7,2],name:"T-Mobile"},
+    CHTR:{date:[2010,11,10],name:"Charter Comm"},SPOT:{date:[2018,4,3],name:"Spotify"},
+    SNAP:{date:[2017,3,2],name:"Snap"},PINS:{date:[2019,4,18],name:"Pinterest"},
+    RBLX:{date:[2021,3,10],name:"Roblox"},SPGI:{date:[1966,5,2],name:"S&P Global"},
+    ICE:{date:[2005,11,16],name:"Intercontinental Exch"},CME:{date:[2002,12,6],name:"CME Group"},
+    MCO:{date:[2000,10,3],name:"Moody's"},CVS:{date:[1972,1,3],name:"CVS Health"},
+    CI:{date:[1974,3,7],name:"Cigna"},HUM:{date:[1961,6,15],name:"Humana"},
+    AMT:{date:[1998,6,4],name:"American Tower"},PLD:{date:[1997,11,20],name:"Prologis"},
+    EQIX:{date:[2000,8,16],name:"Equinix"},CCI:{date:[1998,8,18],name:"Crown Castle"},
+    SPG:{date:[1993,3,19],name:"Simon Property"},PG:{date:[1890,1,2],name:"Procter & Gamble"},
+    CL:{date:[1923,9,25],name:"Colgate-Palmolive"},KMB:{date:[1928,10,1],name:"Kimberly-Clark"},
+    GIS:{date:[1928,7,2],name:"General Mills"},MO:{date:[1928,1,2],name:"Altria"},
+    PM:{date:[2008,3,31],name:"Philip Morris"},F:{date:[1956,2,24],name:"Ford"},
+    GM:{date:[2010,11,18],name:"General Motors"},DAL:{date:[2007,5,3],name:"Delta Air Lines"},
+    UAL:{date:[2006,2,1],name:"United Airlines"},MAR:{date:[1998,10,8],name:"Marriott"},
+    HLT:{date:[2013,12,12],name:"Hilton"},KLAC:{date:[1980,6,16],name:"KLA Corp"},
+    MRVL:{date:[2000,6,27],name:"Marvell Tech"},NXPI:{date:[2010,8,6],name:"NXP Semis"},
+    ON:{date:[2000,5,10],name:"ON Semiconductor"},FTNT:{date:[2009,11,18],name:"Fortinet"},
+    OKTA:{date:[2017,4,7],name:"Okta"},ACN:{date:[2001,7,19],name:"Accenture"},
+    INTU:{date:[1993,3,12],name:"Intuit"},ANET:{date:[2014,6,6],name:"Arista Networks"},
+    TTD:{date:[2016,9,21],name:"Trade Desk"},DASH:{date:[2020,12,9],name:"DoorDash"},
+    APP:{date:[2018,9,18],name:"AppLovin"},AFRM:{date:[2021,1,13],name:"Affirm"},
+    SMCI:{date:[2007,3,29],name:"Super Micro"},ARM:{date:[2023,9,14],name:"ARM Holdings"},
+    ASML:{date:[1995,3,6],name:"ASML"},TSM:{date:[1994,10,13],name:"TSMC"},
+    SHOP:{date:[2015,5,21],name:"Shopify"},MELI:{date:[2007,8,10],name:"MercadoLibre"},
+    NET:{date:[2019,9,13],name:"Cloudflare"},HUBS:{date:[2014,10,9],name:"HubSpot"},
+    ZM:{date:[2019,4,18],name:"Zoom"},DKNG:{date:[2020,4,24],name:"DraftKings"},
+    AXON:{date:[2001,5,9],name:"Axon Enterprise"},BKNG:{date:[1999,3,30],name:"Booking Holdings"},
+    EXPE:{date:[1999,11,8],name:"Expedia"},LULU:{date:[2007,7,27],name:"Lululemon"},
+    RL:{date:[1997,6,12],name:"Ralph Lauren"},RCL:{date:[1993,4,10],name:"Royal Caribbean"},
+    CCL:{date:[1987,7,31],name:"Carnival"},NCLH:{date:[2013,1,18],name:"Norwegian Cruise"},
+    WBD:{date:[2022,4,11],name:"Warner Bros Discovery"},COST:{date:[1985,12,5],name:"Costco"},
+    HD:{date:[1981,9,22],name:"Home Depot"},LOW:{date:[1961,10,10],name:"Lowe's"},
+    TJX:{date:[1987,1,23],name:"TJX Companies"},EBAY:{date:[1998,9,24],name:"eBay"},
+    DIS:{date:[1957,11,12],name:"Disney"},CMCSA:{date:[1972,6,29],name:"Comcast"},
+    BA:{date:[1934,9,5],name:"Boeing"},GE:{date:[1892,1,2],name:"GE Aerospace"},
+    MMM:{date:[1916,8,8],name:"3M"},CAT:{date:[1929,12,2],name:"Caterpillar"},
+    HON:{date:[1914,4,15],name:"Honeywell"},LMT:{date:[1995,3,15],name:"Lockheed Martin"},
+    RTX:{date:[1934,9,5],name:"RTX Corp"},NOC:{date:[1994,4,18],name:"Northrop Grumman"},
+    DE:{date:[1978,6,15],name:"Deere & Co"},ABBV:{date:[2013,1,2],name:"AbbVie"},
+    LLY:{date:[1952,7,22],name:"Eli Lilly"},TMO:{date:[1980,7,15],name:"Thermo Fisher"},
+    DHR:{date:[1985,1,15],name:"Danaher"},MDT:{date:[1960,10,11],name:"Medtronic"},
+    BSX:{date:[1992,5,18],name:"Boston Scientific"},ISRG:{date:[2000,6,7],name:"Intuitive Surgical"},
+    REGN:{date:[1991,4,4],name:"Regeneron"},VRTX:{date:[1991,7,26],name:"Vertex Pharma"},
+    BLK:{date:[1999,10,1],name:"BlackRock"},SCHW:{date:[1987,9,22],name:"Charles Schwab"},
+    AXP:{date:[1977,5,2],name:"American Express"},C:{date:[1986,6,3],name:"Citigroup"},
+    USB:{date:[1929,1,2],name:"US Bancorp"},PGR:{date:[1965,4,15],name:"Progressive"},
+    MET:{date:[2000,4,5],name:"MetLife"},IBM:{date:[1915,11,11],name:"IBM"},
+    TXN:{date:[1953,10,1],name:"Texas Instruments"},QCOM:{date:[1991,12,13],name:"Qualcomm"},
+    AVGO:{date:[2009,8,6],name:"Broadcom"},MU:{date:[1984,10,5],name:"Micron"},
+    AMAT:{date:[1972,10,5],name:"Applied Materials"},LRCX:{date:[1984,5,7],name:"Lam Research"},
+    NOW:{date:[2012,6,29],name:"ServiceNow"},PANW:{date:[2012,7,20],name:"Palo Alto Networks"},
+    CRWD:{date:[2019,6,12],name:"CrowdStrike"},DDOG:{date:[2019,9,19],name:"Datadog"},
+    ZS:{date:[2018,3,16],name:"Zscaler"},ADSK:{date:[1985,6,21],name:"Autodesk"},
+    CDNS:{date:[1988,5,2],name:"Cadence Design"},SNPS:{date:[1992,2,26],name:"Synopsys"},
+    IBM:{date:[1915,11,11],name:"IBM"},ORCL:{date:[1986,3,12],name:"Oracle"},
+    SAP:{date:[1998,8,3],name:"SAP SE"},NOW:{date:[2012,6,29],name:"ServiceNow"},
+    WMT:{date:[1972,8,25],name:"Walmart"},TGT:{date:[1967,2,8],name:"Target"},
+    AMGN:{date:[1983,6,17],name:"Amgen"},JNJ:{date:[1944,9,25],name:"J&J"},
+    PFE:{date:[1944,1,3],name:"Pfizer"},MRNA:{date:[2018,12,6],name:"Moderna"},
+    UNH:{date:[1984,10,17],name:"UnitedHealth"},XOM:{date:[1920,3,1],name:"ExxonMobil"},
+    CVX:{date:[1925,1,2],name:"Chevron"},SLB:{date:[1962,11,15],name:"SLB"},
+    KHC:{date:[2015,7,6],name:"Kraft Heinz"},MDLZ:{date:[2012,10,1],name:"Mondelez"},
+    HSY:{date:[1927,9,1],name:"Hershey"},K:{date:[1925,3,2],name:"Kellanova"},
+    TSN:{date:[1963,6,1],name:"Tyson Foods"},KR:{date:[1928,3,1],name:"Kroger"},
+    AZO:{date:[1991,11,18],name:"AutoZone"},ORLY:{date:[1993,4,22],name:"O'Reilly Auto"},
+    PAYX:{date:[1983,7,1],name:"Paychex"},PCAR:{date:[1955,3,1],name:"PACCAR"},
+    COF:{date:[1994,11,16],name:"Capital One"},PNC:{date:[1972,4,1],name:"PNC Financial"},
+    USB:{date:[1929,1,2],name:"US Bancorp"},KEY:{date:[1972,3,1],name:"KeyCorp"},
+    NSC:{date:[1982,6,1],name:"Norfolk Southern"},UNP:{date:[1969,3,1],name:"Union Pacific"},
+    UPS:{date:[1999,11,10],name:"UPS"},FDX:{date:[1978,4,12],name:"FedEx"},
+    ABT:{date:[1929,11,1],name:"Abbott Labs"},SYK:{date:[1979,9,1],name:"Stryker"},
+    ZTS:{date:[2013,2,1],name:"Zoetis"},ROST:{date:[1985,8,23],name:"Ross Stores"},
+    ODFL:{date:[1991,9,19],name:"Old Dominion"},O:{date:[1994,10,18],name:"Realty Income"},
+    PSA:{date:[1984,10,1],name:"Public Storage"},WM:{date:[1971,6,1],name:"Waste Mgmt"},
+    RSG:{date:[1998,12,14],name:"Republic Services"},CTAS:{date:[1983,6,21],name:"Cintas"},
+    URI:{date:[1997,12,12],name:"United Rentals"},FAST:{date:[1987,8,21],name:"Fastenal"},
+    MCK:{date:[1994,10,24],name:"McKesson"},MSCI:{date:[2007,11,15],name:"MSCI"},
+    VRSK:{date:[2009,10,7],name:"Verisk"},IQV:{date:[2014,5,9],name:"IQVIA"},
+    BX:{date:[2007,6,22],name:"Blackstone"},KKR:{date:[2010,7,15],name:"KKR"},
+    LEN:{date:[1971,1,1],name:"Lennar"},DHI:{date:[1992,6,12],name:"DR Horton"},
+    PHM:{date:[1972,3,1],name:"PulteGroup"},NVR:{date:[1993,4,9],name:"NVR Inc"},
+    ITW:{date:[1967,3,1],name:"Illinois Tool Works"},PH:{date:[1938,1,2],name:"Parker Hannifin"},
+    EMR:{date:[1956,11,1],name:"Emerson Electric"},ETN:{date:[1916,11,1],name:"Eaton"},
+    ROK:{date:[1990,9,1],name:"Rockwell Automation"},ROP:{date:[1992,11,3],name:"Roper Tech"},
+    CARR:{date:[2020,4,3],name:"Carrier Global"},OTIS:{date:[2020,4,3],name:"Otis Worldwide"},
+    AME:{date:[1930,1,2],name:"AMETEK"},PWR:{date:[2001,2,6],name:"Quanta Services"},
+    ENPH:{date:[2012,3,30],name:"Enphase Energy"},SEDG:{date:[2015,3,26],name:"SolarEdge"},
+    AES:{date:[1991,6,12],name:"AES Corp"},CEG:{date:[2022,2,2],name:"Constellation Energy"},
+    PCG:{date:[1912,10,1],name:"PG&E"},D:{date:[1983,11,1],name:"Dominion Energy"},
+    WEC:{date:[1947,1,2],name:"WEC Energy"},XEL:{date:[1947,1,2],name:"Xcel Energy"},
+    OKE:{date:[1997,5,1],name:"ONEOK"},WMB:{date:[1975,3,1],name:"Williams Companies"},
+    ALB:{date:[1994,2,28],name:"Albemarle"},MOS:{date:[2004,10,22],name:"Mosaic Co"},
+    CF:{date:[2005,8,10],name:"CF Industries"},LYFT:{date:[2019,3,29],name:"Lyft"},
+    SE:{date:[2017,10,20],name:"Sea Limited"},MARA:{date:[2012,6,26],name:"Marathon Digital"},
+    MSTR:{date:[1998,6,11],name:"MicroStrategy"},SOFI:{date:[2021,6,1],name:"SoFi"},
+    RIVN:{date:[2021,11,10],name:"Rivian"},BABA:{date:[2014,9,19],name:"Alibaba"},
+    NU:{date:[2021,12,9],name:"Nu Holdings"},HOOD:{date:[2021,7,29],name:"Robinhood"},
+    S:{date:[2021,6,30],name:"SentinelOne"},BRZE:{date:[2021,11,3],name:"Braze"},
+    TOST:{date:[2021,9,22],name:"Toast"},IOT:{date:[2021,12,15],name:"Samsara"},
+    CFLT:{date:[2021,6,24],name:"Confluent"},PATH:{date:[2021,4,21],name:"UiPath"},
+    GTLB:{date:[2021,10,14],name:"GitLab"},MGM:{date:[2011,2,10],name:"MGM Resorts"},
+    WYNN:{date:[2002,10,25],name:"Wynn Resorts"},LVS:{date:[2004,12,14],name:"Las Vegas Sands"},
+    PENN:{date:[1994,3,14],name:"Penn Entertainment"},
+    // ── Missing S&P 500 Complete ──────────────────────────────────────────────
+    ABT:{date:[1929,11,1],name:"Abbott Labs"},A:{date:[1999,11,18],name:"Agilent Tech"},
+    AKAM:{date:[1999,10,29],name:"Akamai"},ALB:{date:[1994,2,28],name:"Albemarle"},
+    ARE:{date:[1994,5,26],name:"Alexandria RE"},ALLE:{date:[2013,11,18],name:"Allegion"},
+    LNT:{date:[1995,1,3],name:"Alliant Energy"},AIG:{date:[1969,5,1],name:"AIG"},
+    AWK:{date:[2008,4,23],name:"American Water Works"},AMP:{date:[2005,9,30],name:"Ameriprise"},
+    ABC:{date:[2001,3,1],name:"AmerisourceBergen"},APH:{date:[1991,11,21],name:"Amphenol"},
+    ADI:{date:[1969,11,1],name:"Analog Devices"},ANSS:{date:[1996,6,10],name:"Ansys"},
+    AJG:{date:[1981,6,1],name:"Arthur J Gallagher"},AIZ:{date:[2003,2,5],name:"Assurant"},
+    ATO:{date:[1983,11,1],name:"Atmos Energy"},AVB:{date:[1994,3,11],name:"AvalonBay"},
+    AVY:{date:[1961,9,1],name:"Avery Dennison"},BALL:{date:[1972,11,1],name:"Ball Corp"},
+    BIO:{date:[1996,11,20],name:"Bio-Rad Labs"},TECH:{date:[1997,12,3],name:"Bio-Techne"},
+    BWA:{date:[1993,4,8],name:"BorgWarner"},BMY:{date:[1929,7,1],name:"Bristol Myers Squibb"},
+    BR:{date:[2007,3,30],name:"Broadridge Financial"},BRO:{date:[1993,1,4],name:"Brown & Brown"},
+    BLDR:{date:[2004,7,22],name:"Builders FirstSource"},BG:{date:[2001,8,1],name:"Bunge Global"},
+    CZR:{date:[2004,1,28],name:"Caesars Entertainment"},CPT:{date:[1993,3,19],name:"Camden Property"},
+    CPB:{date:[1954,6,1],name:"Campbell Soup"},KMX:{date:[2002,2,1],name:"CarMax"},
+    CBRE:{date:[2004,6,10],name:"CBRE Group"},CDW:{date:[2013,7,2],name:"CDW Corp"},
+    CE:{date:[2005,1,26],name:"Celanese"},CNC:{date:[2001,1,3],name:"Centene"},
+    CNP:{date:[1930,6,1],name:"CenterPoint Energy"},CRL:{date:[2000,6,27],name:"Charles River Labs"},
+    CHD:{date:[1981,1,2],name:"Church & Dwight"},CINF:{date:[1957,8,1],name:"Cincinnati Financial"},
+    CLX:{date:[1969,5,1],name:"Clorox"},CMS:{date:[1987,3,1],name:"CMS Energy"},
+    CTSH:{date:[1998,6,19],name:"Cognizant"},CMA:{date:[1973,1,2],name:"Comerica"},
+    CAG:{date:[1983,9,1],name:"ConAgra Brands"},ED:{date:[1936,5,1],name:"Consolidated Edison"},
+    STZ:{date:[1972,11,1],name:"Constellation Brands"},COO:{date:[1997,5,1],name:"Cooper Companies"},
+    CPRT:{date:[1994,2,22],name:"Copart"},GLW:{date:[1945,5,1],name:"Corning"},
+    CTVA:{date:[2019,6,3],name:"Corteva"},CTRA:{date:[2020,10,1],name:"Coterra Energy"},
+    CSX:{date:[1980,5,1],name:"CSX Corp"},CMI:{date:[1952,2,1],name:"Cummins"},
+    DHR:{date:[1985,1,15],name:"Danaher"},DRI:{date:[1995,5,10],name:"Darden Restaurants"},
+    DVA:{date:[1995,11,1],name:"DaVita"},DVN:{date:[1988,9,1],name:"Devon Energy"},
+    FANG:{date:[2012,10,11],name:"Diamondback Energy"},DLR:{date:[2004,11,3],name:"Digital Realty"},
+    DFS:{date:[2007,6,12],name:"Discover Financial"},DG:{date:[2009,11,13],name:"Dollar General"},
+    DLTR:{date:[1995,3,6],name:"Dollar Tree"},DPZ:{date:[2004,7,13],name:"Domino's Pizza"},
+    DOV:{date:[1955,3,1],name:"Dover Corp"},DOW:{date:[2019,4,2],name:"Dow Inc"},
+    DTE:{date:[1947,1,2],name:"DTE Energy"},DD:{date:[2019,6,3],name:"DuPont"},
+    DXC:{date:[2017,4,3],name:"DXC Technology"},EMN:{date:[1994,1,3],name:"Eastman Chemical"},
+    EFX:{date:[1965,3,1],name:"Equifax"},EQR:{date:[1993,8,18],name:"Equity Residential"},
+    WELL:{date:[1992,5,1],name:"Welltower"},ES:{date:[1947,4,1],name:"Eversource Energy"},
+    EXR:{date:[2004,8,17],name:"Extra Space Storage"},FFIV:{date:[1999,6,4],name:"F5 Inc"},
+    FDS:{date:[1996,7,31],name:"FactSet Research"},FICO:{date:[1987,6,1],name:"FICO"},
+    FRT:{date:[1962,11,1],name:"Federal Realty"},FIS:{date:[2001,2,1],name:"Fidelity Natl Info"},
+    FITB:{date:[1975,4,1],name:"Fifth Third Bancorp"},GEHC:{date:[2023,1,4],name:"GE HealthCare"},
+    GPC:{date:[1928,3,1],name:"Genuine Parts"},GM:{date:[2010,11,18],name:"General Motors"},
+    GWW:{date:[1967,4,1],name:"WW Grainger"},HIG:{date:[1995,3,23],name:"Hartford Financial"},
+    HAS:{date:[1968,8,1],name:"Hasbro"},HCA:{date:[1992,3,4],name:"HCA Healthcare"},
+    PEAK:{date:[1985,5,1],name:"Healthpeak"},HSIC:{date:[1995,11,3],name:"Henry Schein"},
+    HSY:{date:[1927,9,1],name:"Hershey"},HPE:{date:[2015,11,2],name:"HP Enterprise"},
+    HPQ:{date:[1961,3,1],name:"HP Inc"},HRL:{date:[1927,9,1],name:"Hormel Foods"},
+    HST:{date:[1998,1,12],name:"Host Hotels"},HWM:{date:[2016,11,1],name:"Howmet Aerospace"},
+    HBAN:{date:[1983,11,1],name:"Huntington Bancshares"},HII:{date:[2011,3,31],name:"Huntington Ingalls"},
+    IEX:{date:[2001,3,15],name:"IDEX Corp"},IR:{date:[2020,3,2],name:"Ingersoll Rand"},
+    IFF:{date:[1951,9,1],name:"Intl Flavors"},IP:{date:[1936,1,2],name:"Intl Paper"},
+    IPG:{date:[1969,5,1],name:"Interpublic Group"},INVH:{date:[2017,2,1],name:"Invitation Homes"},
+    IRM:{date:[1996,2,7],name:"Iron Mountain"},K:{date:[1925,3,2],name:"Kellanova"},
+    KEY:{date:[1972,3,1],name:"KeyCorp"},KIM:{date:[1991,11,1],name:"Kimco Realty"},
+    L:{date:[1956,4,1],name:"Loews Corp"},LHX:{date:[2019,3,1],name:"L3Harris Tech"},
+    LKQ:{date:[2003,10,3],name:"LKQ Corp"},LUV:{date:[1977,6,8],name:"Southwest Airlines"},
+    LYB:{date:[2010,10,14],name:"LyondellBasell"},LYV:{date:[2005,2,14],name:"Live Nation"},
+    MAA:{date:[1994,2,4],name:"Mid-America Apartment"},MAS:{date:[1955,1,2],name:"Masco Corp"},
+    MCHP:{date:[1993,3,23],name:"Microchip Technology"},MHK:{date:[1992,4,1],name:"Mohawk Industries"},
+    MKC:{date:[1933,9,1],name:"McCormick"},MNST:{date:[1995,6,14],name:"Monster Beverage"},
+    MOH:{date:[2003,12,18],name:"Molina Healthcare"},MPWR:{date:[2004,11,4],name:"Monolithic Power"},
+    MSI:{date:[1969,9,1],name:"Motorola Solutions"},MTB:{date:[1983,4,1],name:"M&T Bank"},
+    NI:{date:[1912,1,2],name:"NiSource"},NRG:{date:[2003,12,5],name:"NRG Energy"},
+    NTAP:{date:[1995,11,21],name:"NetApp"},NTRS:{date:[1971,8,1],name:"Northern Trust"},
+    ODFL:{date:[1991,9,19],name:"Old Dominion Freight"},OMC:{date:[1986,5,1],name:"Omnicom Group"},
+    PAYC:{date:[2014,4,15],name:"Paycom"},PEG:{date:[1947,4,1],name:"PSEG"},
+    PFG:{date:[2001,10,22],name:"Principal Financial"},PKG:{date:[2000,1,28],name:"Packaging Corp"},
+    PNR:{date:[1966,5,1],name:"Pentair"},PNW:{date:[1947,1,2],name:"Pinnacle West"},
+    POOL:{date:[1995,10,31],name:"Pool Corp"},PPL:{date:[1946,3,1],name:"PPL Corp"},
+    PTC:{date:[1989,5,26],name:"PTC Inc"},QRVO:{date:[2015,1,2],name:"Qorvo"},
+    REG:{date:[1963,6,1],name:"Regency Centers"},RF:{date:[1971,8,1],name:"Regions Financial"},
+    RHI:{date:[1978,9,1],name:"Robert Half"},RJF:{date:[1983,3,1],name:"Raymond James"},
+    ROL:{date:[1967,6,1],name:"Rollins"},SBAC:{date:[1999,6,16],name:"SBA Communications"},
+    SJM:{date:[1959,1,2],name:"JM Smucker"},SNA:{date:[1930,6,1],name:"Snap-on"},
+    SRE:{date:[1998,6,26],name:"Sempra"},STX:{date:[2002,4,18],name:"Seagate Tech"},
+    SWK:{date:[1966,11,1],name:"Stanley Black & Decker"},SYF:{date:[2014,7,25],name:"Synchrony Financial"},
+    SYY:{date:[1970,8,1],name:"Sysco"},TAP:{date:[1993,8,1],name:"Molson Coors"},
+    TDG:{date:[2006,3,16],name:"TransDigm"},TDY:{date:[1999,11,19],name:"Teledyne Tech"},
+    TEL:{date:[2007,6,29],name:"TE Connectivity"},TER:{date:[1978,10,1],name:"Teradyne"},
+    TFX:{date:[1996,2,14],name:"Teleflex"},TRMB:{date:[1990,9,1],name:"Trimble"},
+    TSCO:{date:[1994,2,1],name:"Tractor Supply"},TTWO:{date:[1993,4,15],name:"Take-Two Interactive"},
+    TXT:{date:[1966,4,1],name:"Textron"},TYL:{date:[1997,6,12],name:"Tyler Technologies"},
+    UDR:{date:[1972,8,1],name:"UDR Inc"},UHS:{date:[1981,10,1],name:"Universal Health Svcs"},
+    URI:{date:[1997,12,12],name:"United Rentals"},VFC:{date:[1966,11,1],name:"VF Corp"},
+    VLTO:{date:[2023,9,29],name:"Veralto"},VNO:{date:[1993,8,1],name:"Vornado Realty"},
+    VRSN:{date:[1998,1,30],name:"VeriSign"},VTR:{date:[1999,2,1],name:"Ventas"},
+    VTRS:{date:[2020,11,16],name:"Viatris"},WAB:{date:[1995,4,19],name:"Westinghouse Air Brake"},
+    WAT:{date:[1994,11,18],name:"Waters Corp"},WBA:{date:[1927,4,1],name:"Walgreens"},
+    WDC:{date:[1993,11,1],name:"Western Digital"},WHR:{date:[1949,2,1],name:"Whirlpool"},
+    WRB:{date:[1974,8,1],name:"WR Berkley"},WRK:{date:[2015,7,1],name:"WestRock"},
+    WST:{date:[1985,8,1],name:"West Pharmaceutical"},WY:{date:[1946,9,1],name:"Weyerhaeuser"},
+    ZBRA:{date:[1991,11,8],name:"Zebra Technologies"},XEL:{date:[1947,1,2],name:"Xcel Energy"},
+    EBAY:{date:[1998,9,24],name:"eBay"},COF:{date:[1994,11,16],name:"Capital One"},
+    PRU:{date:[2001,12,13],name:"Prudential"},AFL:{date:[1974,2,5],name:"Aflac"},
+    ALL:{date:[1993,6,2],name:"Allstate"},MMC:{date:[1962,3,1],name:"Marsh McLennan"},
+    TRV:{date:[1864,1,2],name:"Travelers"},CB:{date:[1985,5,1],name:"Chubb"},
+    AON:{date:[1982,9,1],name:"Aon"},EQIX:{date:[2000,8,16],name:"Equinix"},
+    CCI:{date:[1998,8,18],name:"Crown Castle"},SPG:{date:[1993,3,19],name:"Simon Property"},
+    AMT:{date:[1998,6,4],name:"American Tower"},VRTX:{date:[1991,7,26],name:"Vertex Pharma"},
+    DDOG:{date:[2019,9,19],name:"Datadog"},ZS:{date:[2018,3,16],name:"Zscaler"},
+    OKTA:{date:[2017,4,7],name:"Okta"},NET:{date:[2019,9,13],name:"Cloudflare"},
+    HUBS:{date:[2014,10,9],name:"HubSpot"},NCLH:{date:[2013,1,18],name:"Norwegian Cruise"},
+    WBD:{date:[2022,4,11],name:"Warner Bros Discovery"},EXPE:{date:[1999,11,8],name:"Expedia"},
+    NXPI:{date:[2010,8,6],name:"NXP Semis"},NOC:{date:[1994,4,18],name:"Northrop Grumman"},
+    CAH:{date:[1983,8,1],name:"Cardinal Health"},BDX:{date:[1926,5,1],name:"Becton Dickinson"},
+    BAX:{date:[1952,1,2],name:"Baxter"},PODD:{date:[2007,5,11],name:"Insulet"},
+    ALGN:{date:[2001,5,25],name:"Align Technology"},EXAS:{date:[2001,2,8],name:"Exact Sciences"},
+    MTD:{date:[1997,10,28],name:"Mettler-Toledo"},EW:{date:[1970,10,1],name:"Edwards Lifesciences"},
+    HOLX:{date:[1990,5,1],name:"Hologic"},INCY:{date:[1993,11,18],name:"Incyte"},
+    BIIB:{date:[1991,3,6],name:"Biogen"},GILD:{date:[1992,1,22],name:"Gilead Sciences"},
+    IDXX:{date:[1991,6,12],name:"IDEXX Labs"},IQV:{date:[2014,5,9],name:"IQVIA"},
+    // ── Final stocks to reach 550+ ─────────────────────────────────────────
+    GD:{date:[1952,4,1],name:"General Dynamics"},TDY:{date:[1999,11,19],name:"Teledyne"},
+    TEL:{date:[2007,6,29],name:"TE Connectivity"},TER:{date:[1978,10,1],name:"Teradyne"},
+    TFX:{date:[1996,2,14],name:"Teleflex"},TRMB:{date:[1990,9,1],name:"Trimble"},
+    TTWO:{date:[1993,4,15],name:"Take-Two Interactive"},TXT:{date:[1966,4,1],name:"Textron"},
+    TYL:{date:[1997,6,12],name:"Tyler Technologies"},UHS:{date:[1981,10,1],name:"Universal Health"},
+    VLTO:{date:[2023,9,29],name:"Veralto"},VTRS:{date:[2020,11,16],name:"Viatris"},
+    WBA:{date:[1927,4,1],name:"Walgreens"},WDC:{date:[1993,11,1],name:"Western Digital"},
+    WHR:{date:[1949,2,1],name:"Whirlpool"},WRK:{date:[2015,7,1],name:"WestRock"},
+    WST:{date:[1985,8,1],name:"West Pharmaceutical"},WY:{date:[1946,9,1],name:"Weyerhaeuser"},
+    CHRW:{date:[1997,10,8],name:"CH Robinson"},XPO:{date:[2011,9,2],name:"XPO Logistics"},
+    ADP:{date:[1961,9,1],name:"ADP"},WSM:{date:[1983,4,1],name:"Williams-Sonoma"},
+    BBY:{date:[1985,5,20],name:"Best Buy"},EXPD:{date:[1984,7,1],name:"Expeditors Intl"},
+    TLT:{date:[2002,7,26],name:"20yr Treasury ETF"},HYG:{date:[2007,4,11],name:"High Yield Bond"},
+    AFG:{date:[1980,1,2],name:"American Financial"},MAS:{date:[1955,1,2],name:"Masco Corp"},
+    MCHP:{date:[1993,3,23],name:"Microchip Technology"},MSI:{date:[1969,9,1],name:"Motorola Solutions"},
+    NI:{date:[1912,1,2],name:"NiSource"},NTAP:{date:[1995,11,21],name:"NetApp"},
+    NTRS:{date:[1971,8,1],name:"Northern Trust"},NVR:{date:[1993,4,9],name:"NVR Inc"},
+    NWS:{date:[2013,6,19],name:"News Corp"},ODFL:{date:[1991,9,19],name:"Old Dominion Freight"},
+    OMC:{date:[1986,5,1],name:"Omnicom Group"},ON:{date:[2000,5,10],name:"ON Semiconductor"},
+    PAYC:{date:[2014,4,15],name:"Paycom"},PAYX:{date:[1983,7,1],name:"Paychex"},
+    PCAR:{date:[1955,3,1],name:"PACCAR"},PEG:{date:[1947,4,1],name:"PSEG"},
+    PFG:{date:[2001,10,22],name:"Principal Financial"},PKG:{date:[2000,1,28],name:"Packaging Corp"},
+    PNR:{date:[1966,5,1],name:"Pentair"},PNW:{date:[1947,1,2],name:"Pinnacle West"},
+    POOL:{date:[1995,10,31],name:"Pool Corp"},PTC:{date:[1989,5,26],name:"PTC Inc"},
+    QRVO:{date:[2015,1,2],name:"Qorvo"},RHI:{date:[1978,9,1],name:"Robert Half"},
+    RJF:{date:[1983,3,1],name:"Raymond James"},ROL:{date:[1967,6,1],name:"Rollins"},
+    ROST:{date:[1985,8,23],name:"Ross Stores"},RSG:{date:[1998,12,14],name:"Republic Services"},
+    SJM:{date:[1959,1,2],name:"JM Smucker"},SNA:{date:[1930,6,1],name:"Snap-on"},
+    STX:{date:[2002,4,18],name:"Seagate Tech"},SWK:{date:[1966,11,1],name:"Stanley Black & Decker"},
+    SYF:{date:[2014,7,25],name:"Synchrony Financial"},SYY:{date:[1970,8,1],name:"Sysco"},
+    TAP:{date:[1993,8,1],name:"Molson Coors"},UAL:{date:[2006,2,1],name:"United Airlines"},
+    UDR:{date:[1972,8,1],name:"UDR Inc"},LUV:{date:[1977,6,8],name:"Southwest Airlines"},
+    AAL:{date:[2013,12,9],name:"American Airlines"},JBLU:{date:[2002,4,12],name:"JetBlue"},
+    ALK:{date:[1996,12,5],name:"Alaska Air"},DAL:{date:[2007,5,3],name:"Delta Air Lines"},
+    H:{date:[2009,11,5],name:"Hyatt Hotels"},VAC:{date:[2011,11,21],name:"Marriott Vacations"},
+    SEAS:{date:[2013,4,19],name:"SeaWorld"},SIX:{date:[1998,4,1],name:"Six Flags"},
+    BROS:{date:[2021,9,29],name:"Dutch Bros"},SHAK:{date:[2015,1,30],name:"Shake Shack"},
+    WING:{date:[2015,10,29],name:"Wingstop"},QSR:{date:[2014,12,12],name:"Restaurant Brands"},
+    ELV:{date:[2004,11,1],name:"Elevance Health"},DGX:{date:[1996,12,19],name:"Quest Diagnostics"},
+    LH:{date:[1971,9,1],name:"Labcorp"},MRNA:{date:[2018,12,6],name:"Moderna"},
+    REGN:{date:[1991,4,4],name:"Regeneron"},BIIB:{date:[1991,3,6],name:"Biogen"},
+    SRPT:{date:[2012,6,1],name:"Sarepta Therapeutics"},BMRN:{date:[1999,7,21],name:"BioMarin"},
+    ALNY:{date:[2004,6,3],name:"Alnylam"},RARE:{date:[2012,9,27],name:"Ultragenyx"},
+    SE:{date:[2017,10,20],name:"Sea Limited"},NU:{date:[2021,12,9],name:"Nu Holdings"},
+    MELI:{date:[2007,8,10],name:"MercadoLibre"},PDD:{date:[2018,7,26],name:"PDD Holdings"},
+    JD:{date:[2014,5,22],name:"JD.com"},BIDU:{date:[2005,8,5],name:"Baidu"},
+    NTES:{date:[2000,6,30],name:"NetEase"},TME:{date:[2019,3,12],name:"Tencent Music"},
   };
 
-  // ── CEO Database ───────────────────────────────────────────────────────────
+  // ── CEO Database ──────────────────────────────────────────────────────────
   const CEO_DB = {
-    AAPL: {name:"Tim Cook",          dob:[1960,11,1]},
-    MSFT: {name:"Satya Nadella",     dob:[1967,8,19]},
-    NVDA: {name:"Jensen Huang",      dob:[1963,2,17]},
-    AMZN: {name:"Andy Jassy",        dob:[1968,1,13]},
-    GOOGL:{name:"Sundar Pichai",     dob:[1972,6,10]},
-    META: {name:"Mark Zuckerberg",   dob:[1984,5,14]},
-    TSLA: {name:"Elon Musk",         dob:[1971,6,28]},
-    BRKB: {name:"Warren Buffett",    dob:[1930,8,30]},
-    JPM:  {name:"Jamie Dimon",       dob:[1956,3,13]},
-    AMD:  {name:"Lisa Su",           dob:[1969,11,7]},
-    CRM:  {name:"Marc Benioff",      dob:[1964,9,25]},
-    UBER: {name:"Dara Khosrowshahi", dob:[1969,5,28]},
-    GS:   {name:"David Solomon",     dob:[1962,4,22]},
-    BAC:  {name:"Brian Moynihan",    dob:[1959,10,9]},
-    V:    {name:"Ryan McInerney",    dob:[1976,1,1]},
-    NKE:  {name:"Elliott Hill",      dob:[1969,1,1]},
-    SBUX: {name:"Brian Niccol",      dob:[1974,6,5]},
-    MCD:  {name:"Chris Kempczinski", dob:[1968,11,6]},
-    WMT:  {name:"Doug McMillon",     dob:[1966,10,17]},
-    PFE:  {name:"Albert Bourla",     dob:[1961,10,21]},
-    MRNA: {name:"Stephane Bancel",   dob:[1972,4,26]},
-    XOM:  {name:"Darren Woods",      dob:[1964,8,1]},
-    COIN: {name:"Brian Armstrong",   dob:[1983,1,25]},
-    PLTR: {name:"Alex Karp",         dob:[1967,10,2]},
-    SQ:   {name:"Jack Dorsey",       dob:[1976,11,19]},
-    ABNB: {name:"Brian Chesky",      dob:[1981,8,29]},
-    SOFI: {name:"Anthony Noto",      dob:[1969,3,7]},
-    RIVN: {name:"RJ Scaringe",       dob:[1983,9,30]},
-    COST: {name:"Ron Vachris",       dob:[1965,1,1]},
-    HD:   {name:"Ted Decker",        dob:[1964,1,1]},
-    LOW:  {name:"Marvin Ellison",    dob:[1965,3,1]},
-    DIS:  {name:"Bob Iger",          dob:[1951,2,10]},
-    BA:   {name:"Kelly Ortberg",     dob:[1963,1,1]},
-    GE:   {name:"Larry Culp",        dob:[1963,3,9]},
-    CAT:  {name:"Jim Umpleby",       dob:[1959,1,1]},
-    LMT:  {name:"Jim Taiclet",       dob:[1961,1,1]},
-    LLY:  {name:"David Ricks",       dob:[1970,5,23]},
-    TMO:  {name:"Marc Casper",       dob:[1968,1,1]},
-    ISRG: {name:"Gary Guthart",      dob:[1966,1,1]},
-    REGN: {name:"Leonard Schleifer", dob:[1953,6,28]},
-    BLK:  {name:"Larry Fink",        dob:[1952,11,2]},
-    AXP:  {name:"Steve Squeri",      dob:[1959,12,10]},
-    C:    {name:"Jane Fraser",       dob:[1967,4,3]},
-    IBM:  {name:"Arvind Krishna",    dob:[1963,1,1]},
-    QCOM: {name:"Cristiano Amon",    dob:[1970,8,20]},
-    AVGO: {name:"Hock Tan",          dob:[1952,11,1]},
-    NOW:  {name:"Bill McDermott",    dob:[1961,8,18]},
-    PANW: {name:"Nikesh Arora",      dob:[1968,2,9]},
-    CRWD: {name:"George Kurtz",      dob:[1970,9,16]},
-    T:    {name:"John Stankey",      dob:[1963,6,17]},
-    VZ:   {name:"Hans Vestberg",     dob:[1965,9,13]},
-    SPOT: {name:"Daniel Ek",         dob:[1983,2,21]},
-    SNAP: {name:"Evan Spiegel",      dob:[1990,6,4]},
-    CME:  {name:"Terry Duffy",       dob:[1958,5,24]},
-    CVS:  {name:"David Joyner",      dob:[1966,1,1]},
-    CI:   {name:"David Cordani",     dob:[1966,3,1]},
-    PLD:  {name:"Hamid Moghadam",    dob:[1956,8,10]},
-    PG:   {name:"Jon Moeller",       dob:[1964,1,1]},
-    PM:   {name:"Jacek Olczak",      dob:[1966,1,1]},
-    MO:   {name:"Billy Gifford",     dob:[1966,1,1]},
-    F:    {name:"Jim Farley",        dob:[1962,7,7]},
-    GM:   {name:"Mary Barra",        dob:[1961,12,24]},
-    DAL:  {name:"Ed Bastian",        dob:[1957,4,8]},
-    MAR:  {name:"Tony Capuano",      dob:[1965,1,1]},
-    HLT:  {name:"Christopher Nassetta",dob:[1962,11,1]},
-    FTNT: {name:"Ken Xie",           dob:[1965,1,1]},
-    ACN:  {name:"Julie Sweet",       dob:[1967,9,7]},
-    INTU: {name:"Sasan Goodarzi",    dob:[1970,1,1]},
-    ANET: {name:"Jayshree Ullal",    dob:[1961,1,1]},
-    TTD:  {name:"Jeff Green",        dob:[1978,1,1]},
-    DASH: {name:"Tony Xu",           dob:[1984,3,3]},
-    APP:  {name:"Adam Foroughi",     dob:[1980,1,1]},
-    AFRM: {name:"Max Levchin",       dob:[1975,7,11]},
-    SMCI: {name:"Charles Liang",     dob:[1958,1,1]},
-    ARM:  {name:"Rene Haas",         dob:[1966,1,1]},
-    SHOP: {name:"Harley Finkelstein",dob:[1984,1,1]},
-    MELI: {name:"Marcos Galperin",   dob:[1971,10,31]},
-    NET:  {name:"Matthew Prince",    dob:[1980,1,1]},
-    ZM:   {name:"Eric Yuan",         dob:[1970,2,20]},
-    AXON: {name:"Rick Smith",        dob:[1969,5,3]},
-    DKNG: {name:"Jason Robins",      dob:[1980,1,1]},
-    BKNG: {name:"Glenn Fogel",       dob:[1963,1,1]},
-    LULU: {name:"Calvin McDonald",   dob:[1971,1,1]},
-    RL:   {name:"Patrice Louvet",    dob:[1965,1,1]},
-    KLAC: {name:"Rick Wallace",      dob:[1963,1,1]},
-    MRVL: {name:"Matt Murphy",       dob:[1968,1,1]},
-    // Batch 5 CEOs
-    GILD: {name:"Daniel O'Day",       dob:[1964,4,15]},
-    BIIB: {name:"Christopher Viehbacher",dob:[1960,6,26]},
-    ILMN: {name:"Jacob Thaysen",      dob:[1975,1,1]},
-    CB:   {name:"Evan Greenberg",     dob:[1955,3,1]},
-    AON:  {name:"Greg Case",          dob:[1962,1,1]},
-    MMC:  {name:"John Doyle",         dob:[1967,1,1]},
-    COP:  {name:"Ryan Lance",         dob:[1963,1,1]},
-    EOG:  {name:"Ezra Yacob",         dob:[1978,1,1]},
-    OXY:  {name:"Vicki Hollub",       dob:[1960,4,1]},
-    HAL:  {name:"Jeff Miller",        dob:[1964,1,1]},
-    NEE:  {name:"John Ketchum",       dob:[1970,1,1]},
-    DUK:  {name:"Lynn Good",          dob:[1962,6,1]},
-    CMG:  {name:"Brian Niccol",       dob:[1974,6,5]},
-    YUM:  {name:"David Gibbs",        dob:[1966,1,1]},
-    LIN:  {name:"Sanjiv Lamba",       dob:[1966,1,1]},
-    SHW:  {name:"Heidi Petz",         dob:[1976,1,1]},
-    ROK:  {name:"Blake Moret",        dob:[1963,1,1]},
-    ITW:  {name:"Chris O'Herlihy",    dob:[1966,1,1]},
-    UBER: {name:"Dara Khosrowshahi",  dob:[1969,5,28]},
-    LYFT: {name:"David Risher",       dob:[1967,1,1]},
-    RBLX: {name:"Dave Baszucki",      dob:[1963,1,20]},
-    S:    {name:"Tomer Weingarten",   dob:[1978,1,1]},
-    TOST: {name:"Aman Narang",        dob:[1982,1,1]},
-    // Batch 6 CEOs
-    ABT:  {name:"Robert Ford",        dob:[1968,1,1]},
-    COF:  {name:"Richard Fairbank",   dob:[1950,6,16]},
-    KO:   {name:"James Quincey",      dob:[1965,1,1]},
-    CSCO: {name:"Chuck Robbins",      dob:[1966,1,1]},
-    CMCSA:{name:"Brian Roberts",      dob:[1959,6,28]},
-    FDX:  {name:"Raj Subramaniam",    dob:[1967,1,1]},
-    GPC:  {name:"Paul Donahue",       dob:[1961,1,1]},
-    GIS:  {name:"Jeff Harmening",     dob:[1966,1,1]},
-    HPQ:  {name:"Enrique Lores",      dob:[1965,1,1]},
-    HPE:  {name:"Antonio Neri",       dob:[1967,1,1]},
-    HCA:  {name:"Sam Hazen",          dob:[1963,1,1]},
-    HON:  {name:"Vimal Kapur",        dob:[1968,1,1]},
-    HUM:  {name:"Jim Rechtin",        dob:[1970,1,1]},
-    IBM:  {name:"Arvind Krishna",     dob:[1963,1,1]},
-    INTU: {name:"Sasan Goodarzi",     dob:[1970,1,1]},
-    ISRG: {name:"Gary Guthart",       dob:[1966,1,1]},
-    ICE:  {name:"Jeff Sprecher",      dob:[1965,1,1]},
-    IQV:  {name:"Ari Bousbib",        dob:[1961,1,1]},
-    DE:   {name:"John May",           dob:[1964,1,1]},
-    DIS:  {name:"Bob Iger",           dob:[1951,2,10]},
-    CMG:  {name:"Scott Boatwright",   dob:[1974,1,1]},
-    COO:  {name:"Al White",           dob:[1963,1,1]},
-    COST: {name:"Ron Vachris",        dob:[1965,1,1]},
-    CVS:  {name:"David Joyner",       dob:[1966,1,1]},
-    DHR:  {name:"Rainer Blair",       dob:[1967,1,1]},
-    DG:   {name:"Todd Vasos",         dob:[1961,1,1]},
-    EA:   {name:"Andrew Wilson",      dob:[1973,1,1]},
-    EMR:  {name:"Lal Karsanbhai",     dob:[1974,1,1]},
-    EOG:  {name:"Ezra Yacob",         dob:[1978,1,1]},
-    HAL:  {name:"Jeff Miller",        dob:[1964,1,1]},
-    LLY:  {name:"David Ricks",        dob:[1970,5,23]},
-    // Final batch CEOs
-    KHC:  {name:"Carlos Abrams-Rivera",dob:[1968,1,1]},
-    KR:   {name:"Rodney McMullen",    dob:[1961,1,1]},
-    LEN:  {name:"Stuart Miller",      dob:[1960,1,1]},
-    LUV:  {name:"Bob Jordan",         dob:[1960,5,25]},
-    MCK:  {name:"Brian Tyler",        dob:[1969,1,1]},
-    MRK:  {name:"Rob Davis",          dob:[1965,1,1]},
-    MSI:  {name:"Greg Brown",         dob:[1960,7,21]},
-    NSC:  {name:"Alan Shaw",          dob:[1966,1,1]},
-    NOC:  {name:"Kathy Warden",       dob:[1970,1,1]},
-    O:    {name:"Sumit Roy",          dob:[1974,1,1]},
-    ORLY: {name:"Brad Beckham",       dob:[1975,1,1]},
-    PAYX: {name:"John Gibson",        dob:[1962,1,1]},
-    PCAR: {name:"Preston Feight",     dob:[1966,1,1]},
-    PNC:  {name:"Bill Demchak",       dob:[1962,6,5]},
-    PSA:  {name:"Joe Russell",        dob:[1964,1,1]},
-    ROST: {name:"Barbara Rentler",    dob:[1958,1,1]},
-    RSG:  {name:"Jon Vander Ark",     dob:[1971,1,1]},
-    SYK:  {name:"Kevin Lobo",         dob:[1963,5,1]},
-    SYY:  {name:"Kevin Hourican",     dob:[1971,1,1]},
-    TDG:  {name:"Kevin Stein",        dob:[1968,1,1]},
-    TSN:  {name:"Donnie King",        dob:[1963,1,1]},
-    UNP:  {name:"Jim Vena",           dob:[1958,8,1]},
-    UPS:  {name:"Carol Tome",         dob:[1957,9,21]},
-    URI:  {name:"Matthew Flannery",   dob:[1969,1,1]},
-    USB:  {name:"Andy Cecere",        dob:[1961,1,1]},
-    VFC:  {name:"Bracken Darrell",    dob:[1963,1,1]},
-    WM:   {name:"Jim Fish",           dob:[1964,1,1]},
-    WMB:  {name:"Alan Armstrong",     dob:[1963,1,1]},
-    ZTS:  {name:"Kristin Peck",       dob:[1971,1,1]},
-    HUBS: {name:"Yamini Rangan",     dob:[1975,1,1]},
-    RCL:  {name:"Jason Liberty",     dob:[1976,1,1]},
+    AAPL:{name:"Tim Cook",dob:[1960,11,1]},MSFT:{name:"Satya Nadella",dob:[1967,8,19]},
+    NVDA:{name:"Jensen Huang",dob:[1963,2,17]},AMZN:{name:"Andy Jassy",dob:[1968,1,13]},
+    GOOGL:{name:"Sundar Pichai",dob:[1972,6,10]},META:{name:"Mark Zuckerberg",dob:[1984,5,14]},
+    TSLA:{name:"Elon Musk",dob:[1971,6,28]},BRKB:{name:"Warren Buffett",dob:[1930,8,30]},
+    JPM:{name:"Jamie Dimon",dob:[1956,3,13]},AMD:{name:"Lisa Su",dob:[1969,11,7]},
+    CRM:{name:"Marc Benioff",dob:[1964,9,25]},UBER:{name:"Dara Khosrowshahi",dob:[1969,5,28]},
+    GS:{name:"David Solomon",dob:[1962,4,22]},BAC:{name:"Brian Moynihan",dob:[1959,10,9]},
+    NKE:{name:"Elliott Hill",dob:[1969,1,1]},SBUX:{name:"Brian Niccol",dob:[1974,6,5]},
+    MCD:{name:"Chris Kempczinski",dob:[1968,11,6]},WMT:{name:"Doug McMillon",dob:[1966,10,17]},
+    PFE:{name:"Albert Bourla",dob:[1961,10,21]},MRNA:{name:"Stephane Bancel",dob:[1972,4,26]},
+    XOM:{name:"Darren Woods",dob:[1964,8,1]},COIN:{name:"Brian Armstrong",dob:[1983,1,25]},
+    PLTR:{name:"Alex Karp",dob:[1967,10,2]},SQ:{name:"Jack Dorsey",dob:[1976,11,19]},
+    ABNB:{name:"Brian Chesky",dob:[1981,8,29]},SOFI:{name:"Anthony Noto",dob:[1969,3,7]},
+    RIVN:{name:"RJ Scaringe",dob:[1983,9,30]},COST:{name:"Ron Vachris",dob:[1965,1,1]},
+    HD:{name:"Ted Decker",dob:[1964,1,1]},LOW:{name:"Marvin Ellison",dob:[1965,3,1]},
+    DIS:{name:"Bob Iger",dob:[1951,2,10]},BA:{name:"Kelly Ortberg",dob:[1963,1,1]},
+    GE:{name:"Larry Culp",dob:[1963,3,9]},CAT:{name:"Jim Umpleby",dob:[1959,1,1]},
+    LMT:{name:"Jim Taiclet",dob:[1961,1,1]},LLY:{name:"David Ricks",dob:[1970,5,23]},
+    TMO:{name:"Marc Casper",dob:[1968,1,1]},ISRG:{name:"Gary Guthart",dob:[1966,1,1]},
+    REGN:{name:"Leonard Schleifer",dob:[1953,6,28]},BLK:{name:"Larry Fink",dob:[1952,11,2]},
+    AXP:{name:"Steve Squeri",dob:[1959,12,10]},C:{name:"Jane Fraser",dob:[1967,4,3]},
+    IBM:{name:"Arvind Krishna",dob:[1963,1,1]},QCOM:{name:"Cristiano Amon",dob:[1970,8,20]},
+    AVGO:{name:"Hock Tan",dob:[1952,11,1]},NOW:{name:"Bill McDermott",dob:[1961,8,18]},
+    PANW:{name:"Nikesh Arora",dob:[1968,2,9]},CRWD:{name:"George Kurtz",dob:[1970,9,16]},
+    T:{name:"John Stankey",dob:[1963,6,17]},VZ:{name:"Hans Vestberg",dob:[1965,9,13]},
+    SPOT:{name:"Daniel Ek",dob:[1983,2,21]},SNAP:{name:"Evan Spiegel",dob:[1990,6,4]},
+    CME:{name:"Terry Duffy",dob:[1958,5,24]},CVS:{name:"David Joyner",dob:[1966,1,1]},
+    CI:{name:"David Cordani",dob:[1966,3,1]},PLD:{name:"Hamid Moghadam",dob:[1956,8,10]},
+    PG:{name:"Jon Moeller",dob:[1964,1,1]},PM:{name:"Jacek Olczak",dob:[1966,1,1]},
+    MO:{name:"Billy Gifford",dob:[1966,1,1]},F:{name:"Jim Farley",dob:[1962,7,7]},
+    GM:{name:"Mary Barra",dob:[1961,12,24]},DAL:{name:"Ed Bastian",dob:[1957,4,8]},
+    MAR:{name:"Tony Capuano",dob:[1965,1,1]},HLT:{name:"Christopher Nassetta",dob:[1962,11,1]},
+    FTNT:{name:"Ken Xie",dob:[1965,1,1]},ACN:{name:"Julie Sweet",dob:[1967,9,7]},
+    INTU:{name:"Sasan Goodarzi",dob:[1970,1,1]},ANET:{name:"Jayshree Ullal",dob:[1961,1,1]},
+    TTD:{name:"Jeff Green",dob:[1978,1,1]},DASH:{name:"Tony Xu",dob:[1984,3,3]},
+    APP:{name:"Adam Foroughi",dob:[1980,1,1]},AFRM:{name:"Max Levchin",dob:[1975,7,11]},
+    SMCI:{name:"Charles Liang",dob:[1958,1,1]},ARM:{name:"Rene Haas",dob:[1966,1,1]},
+    SHOP:{name:"Harley Finkelstein",dob:[1984,1,1]},MELI:{name:"Marcos Galperin",dob:[1971,10,31]},
+    NET:{name:"Matthew Prince",dob:[1980,1,1]},ZM:{name:"Eric Yuan",dob:[1970,2,20]},
+    AXON:{name:"Rick Smith",dob:[1969,5,3]},DKNG:{name:"Jason Robins",dob:[1980,1,1]},
+    BKNG:{name:"Glenn Fogel",dob:[1963,1,1]},LULU:{name:"Calvin McDonald",dob:[1971,1,1]},
+    RL:{name:"Patrice Louvet",dob:[1965,1,1]},GILD:{name:"Daniel O'Day",dob:[1964,4,15]},
+    BIIB:{name:"Christopher Viehbacher",dob:[1960,6,26]},COP:{name:"Ryan Lance",dob:[1963,1,1]},
+    OXY:{name:"Vicki Hollub",dob:[1960,4,1]},HAL:{name:"Jeff Miller",dob:[1964,1,1]},
+    NEE:{name:"John Ketchum",dob:[1970,1,1]},DUK:{name:"Lynn Good",dob:[1962,6,1]},
+    CMG:{name:"Scott Boatwright",dob:[1974,1,1]},MRK:{name:"Rob Davis",dob:[1965,1,1]},
+    NSC:{name:"Alan Shaw",dob:[1966,1,1]},UPS:{name:"Carol Tome",dob:[1957,9,21]},
+    FDX:{name:"Raj Subramaniam",dob:[1967,1,1]},SYK:{name:"Kevin Lobo",dob:[1963,5,1]},
+    ZTS:{name:"Kristin Peck",dob:[1971,1,1]},ROST:{name:"Barbara Rentler",dob:[1958,1,1]},
+    WM:{name:"Jim Fish",dob:[1964,1,1]},UNP:{name:"Jim Vena",dob:[1958,8,1]},
+    USB:{name:"Andy Cecere",dob:[1961,1,1]},KR:{name:"Rodney McMullen",dob:[1961,1,1]},
+    MCK:{name:"Brian Tyler",dob:[1969,1,1]},COF:{name:"Richard Fairbank",dob:[1950,6,16]},
+    PNC:{name:"Bill Demchak",dob:[1962,6,5]},
   };
 
-  // ── Astronomy Engine ───────────────────────────────────────────────────────
-  const julianDay = (y,m,d) => {
-    if (m<=2){y--;m+=12;}
-    const A=Math.floor(y/100), B=2-A+Math.floor(A/4);
-    return Math.floor(365.25*(y+4716))+Math.floor(30.6001*(m+1))+d+B-1524.5;
-  };
-  const norm360 = d => ((d%360)+360)%360;
-  const sunLon = jd => { const n=jd-2451545,L=norm360(280.46+0.9856474*n),g=norm360(357.528+0.9856003*n)*Math.PI/180; return norm360(L+1.915*Math.sin(g)+0.02*Math.sin(2*g)); };
-  const moonLon = jd => { const n=jd-2451545,L=norm360(218.316+13.176396*n),M=norm360(134.963+13.064993*n)*Math.PI/180,F=norm360(93.272+13.22935*n)*Math.PI/180; return norm360(L+6.289*Math.sin(M)-1.274*Math.sin(2*F-M)+0.658*Math.sin(2*F)-0.186*Math.sin(2*M)); };
-  const planetLon = (jd,p) => {
-    const T=(jd-2451545)/36525;
-    const pl={mercury:{L0:252.250906,L1:149472.6746},venus:{L0:181.979801,L1:58517.8157},mars:{L0:355.433,L1:19140.2993},jupiter:{L0:34.351519,L1:3034.9057},saturn:{L0:50.077444,L1:1222.1138},uranus:{L0:314.055005,L1:428.467},neptune:{L0:304.348665,L1:218.4862},pluto:{L0:238.928881,L1:145.183}};
-    return norm360(pl[p].L0+pl[p].L1*T/100);
-  };
-  const getAll = (y,m,d) => {
-    const jd=julianDay(y,m,d);
-    return {sun:sunLon(jd),moon:moonLon(jd),mercury:planetLon(jd,'mercury'),venus:planetLon(jd,'venus'),mars:planetLon(jd,'mars'),jupiter:planetLon(jd,'jupiter'),saturn:planetLon(jd,'saturn'),uranus:planetLon(jd,'uranus'),neptune:planetLon(jd,'neptune'),pluto:planetLon(jd,'pluto')};
-  };
-  const signName = d => ["♈Aries","♉Taurus","♊Gemini","♋Cancer","♌Leo","♍Virgo","♎Libra","♏Scorpio","♐Sagittarius","♑Capricorn","♒Aquarius","♓Pisces"][Math.floor(d/30)];
+  // ── Astronomy Engine ──────────────────────────────────────────────────────
+  const julianDay=(y,m,d)=>{if(m<=2){y--;m+=12;}const A=Math.floor(y/100),B=2-A+Math.floor(A/4);return Math.floor(365.25*(y+4716))+Math.floor(30.6001*(m+1))+d+B-1524.5;};
+  const norm360=d=>((d%360)+360)%360;
+  const sunLon=jd=>{const n=jd-2451545,L=norm360(280.46+0.9856474*n),g=norm360(357.528+0.9856003*n)*Math.PI/180;return norm360(L+1.915*Math.sin(g)+0.02*Math.sin(2*g));};
+  const moonLon=jd=>{const n=jd-2451545,L=norm360(218.316+13.176396*n),M=norm360(134.963+13.064993*n)*Math.PI/180,F=norm360(93.272+13.22935*n)*Math.PI/180;return norm360(L+6.289*Math.sin(M)-1.274*Math.sin(2*F-M)+0.658*Math.sin(2*F)-0.186*Math.sin(2*M));};
+  const planetLon=(jd,p)=>{const T=(jd-2451545)/36525;const pl={mercury:{L0:252.250906,L1:149472.6746},venus:{L0:181.979801,L1:58517.8157},mars:{L0:355.433,L1:19140.2993},jupiter:{L0:34.351519,L1:3034.9057},saturn:{L0:50.077444,L1:1222.1138},uranus:{L0:314.055005,L1:428.467},neptune:{L0:304.348665,L1:218.4862},pluto:{L0:238.928881,L1:145.183}};return norm360(pl[p].L0+pl[p].L1*T/100);};
+  const getAll=(y,m,d)=>{const jd=julianDay(y,m,d);return{sun:sunLon(jd),moon:moonLon(jd),mercury:planetLon(jd,'mercury'),venus:planetLon(jd,'venus'),mars:planetLon(jd,'mars'),jupiter:planetLon(jd,'jupiter'),saturn:planetLon(jd,'saturn'),uranus:planetLon(jd,'uranus'),neptune:planetLon(jd,'neptune'),pluto:planetLon(jd,'pluto')};};
+  const signName=d=>["♈Aries","♉Taurus","♊Gemini","♋Cancer","♌Leo","♍Virgo","♎Libra","♏Scorpio","♐Sagittarius","♑Capricorn","♒Aquarius","♓Pisces"][Math.floor(d/30)];
 
-  const ASPECTS = [[0,8,"Conjunction","intense"],[60,6,"Sextile","positive"],[90,7,"Square","tense"],[120,8,"Trine","positive"],[150,5,"Quincunx","mixed"],[180,8,"Opposition","tense"]];
-  const PW = {sun:8,moon:6,mercury:5,venus:7,mars:6,jupiter:9,saturn:8,uranus:5,neptune:4,pluto:5};
+  const ASPECTS=[[0,8,"Conjunction","intense"],[60,6,"Sextile","positive"],[90,7,"Square","tense"],[120,8,"Trine","positive"],[150,5,"Quincunx","mixed"],[180,8,"Opposition","tense"]];
+  const PW={sun:8,moon:6,mercury:5,venus:7,mars:6,jupiter:9,saturn:8,uranus:5,neptune:4,pluto:5};
 
-  const analyzeStock = (ipoDate, transitDate) => {
-    const natal = getAll(...ipoDate);
-    const transit = getAll(...transitDate);
-    const aspects = [];
-    let totalScore = 0;
-
-    for (const [tP, tDeg] of Object.entries(transit)) {
-      for (const [nP, nDeg] of Object.entries(natal)) {
-        const diff = Math.abs(norm360(tDeg-nDeg));
-        const angle = diff>180?360-diff:diff;
-        for (const [aspAngle,orb,aspName,nature] of ASPECTS) {
-          if (Math.abs(angle-aspAngle)<=orb) {
-            const exactness = 1-Math.abs(angle-aspAngle)/orb;
-            const baseScore = nature==="positive"?1:nature==="tense"?-1:0.2;
-            const score = baseScore*((PW[tP]+PW[nP])/14)*exactness;
-            totalScore += score;
-            if (exactness>0.4) {
-              aspects.push({transit:tP,natal:nP,aspect:aspName,nature,score,exactness,tDeg,nDeg,tSign:signName(tDeg),nSign:signName(nDeg)});
-            }
+  const calcScore=(ipoDate,transitDate)=>{
+    const natal=getAll(...ipoDate),transit=getAll(...transitDate);
+    let totalScore=0,aspects=[];
+    for(const[tP,tDeg]of Object.entries(transit)){
+      for(const[nP,nDeg]of Object.entries(natal)){
+        const diff=Math.abs(norm360(tDeg-nDeg)),angle=diff>180?360-diff:diff;
+        for(const[aspAngle,orb,aspName,nature]of ASPECTS){
+          if(Math.abs(angle-aspAngle)<=orb){
+            const exactness=1-Math.abs(angle-aspAngle)/orb;
+            const baseScore=nature==="positive"?1:nature==="tense"?-1:0.2;
+            const score=baseScore*((PW[tP]+PW[nP])/14)*exactness;
+            totalScore+=score;
+            if(exactness>0.4)aspects.push({transit:tP,natal:nP,aspect:aspName,nature,score,exactness,tDeg,nDeg,tSign:signName(tDeg),nSign:signName(nDeg)});
           }
         }
       }
     }
     aspects.sort((a,b)=>Math.abs(b.score)-Math.abs(a.score));
-    const normalized = Math.max(-10,Math.min(10,(totalScore/5)*10));
-    const verdict = normalized>=4?"STRONG BULL":normalized>=2?"BULLISH":normalized<=-4?"STRONG BEAR":normalized<=-2?"BEARISH":"NEUTRAL";
-    const verdictColor = normalized>=4?"#00e676":normalized>=2?"#38bdf8":normalized<=-4?"#ff1744":normalized<=-2?"#ff5252":"#f59e0b";
-
-    // Moon phase
-    const moonPhase = getMoonPhase(...transitDate);
-
-    return {score:normalized,verdict,verdictColor,aspects:aspects.slice(0,8),natal,transit,moonPhase};
+    const normalized=Math.max(-10,Math.min(10,(totalScore/5)*10));
+    const verdict=normalized>=4?"STRONG BULL":normalized>=2?"BULLISH":normalized<=-4?"STRONG BEAR":normalized<=-2?"BEARISH":"NEUTRAL";
+    const verdictColor=normalized>=4?"#00e676":normalized>=2?"#38bdf8":normalized<=-4?"#ff1744":normalized<=-2?"#ff5252":"#f59e0b";
+    const jd=julianDay(...transitDate),phase=((((jd-2451550.1)/29.530588)%1)+1)%1;
+    const moonPhaseNames=["🌑 New Moon","🌒 Waxing Crescent","🌓 First Quarter","🌔 Waxing Gibbous","🌕 Full Moon","🌖 Waning Gibbous","🌗 Last Quarter","🌘 Waning Crescent"];
+    const moonPhase=moonPhaseNames[Math.floor(phase*8)%8];
+    return{score:normalized,verdict,verdictColor,aspects:aspects.slice(0,8),natal,transit,moonPhase};
   };
 
-  const getMoonPhase = (y,m,d) => {
-    const jd = julianDay(y,m,d);
-    const phase = ((jd-2451550.1)/29.530588)%1;
-    const normalized = ((phase%1)+1)%1;
-    if (normalized<0.0625||normalized>=0.9375) return {name:"New Moon",symbol:"🌑",energy:"New beginnings, fresh starts"};
-    if (normalized<0.1875) return {name:"Waxing Crescent",symbol:"🌒",energy:"Building momentum, accumulation"};
-    if (normalized<0.3125) return {name:"First Quarter",symbol:"🌓",energy:"Action, decision point"};
-    if (normalized<0.4375) return {name:"Waxing Gibbous",symbol:"🌔",energy:"Growth, refinement"};
-    if (normalized<0.5625) return {name:"Full Moon",symbol:"🌕",energy:"Peak energy, high volatility"};
-    if (normalized<0.6875) return {name:"Waning Gibbous",symbol:"🌖",energy:"Distribution, profit taking"};
-    if (normalized<0.8125) return {name:"Last Quarter",symbol:"🌗",energy:"Release, correction phase"};
-    return {name:"Waning Crescent",symbol:"🌘",energy:"Rest, consolidation"};
-  };
+  const dateToArr=(dateStr)=>{const[y,m,d]=dateStr.split("-").map(Number);return[y,m,d];};
 
-  const now = new Date();
-  const TODAY = [now.getFullYear(), now.getMonth()+1, now.getDate()];
-
-  const analyze = (sym) => {
-    const s = sym.toUpperCase().trim();
-    const stock = IPO_DB[s];
-    if (!stock) {
-      setResult({error: "Stock not in database yet. We're adding more daily!"});
-      return;
-    }
+  const analyze=(sym,dateStr)=>{
+    const s=sym.toUpperCase().trim();
+    const stock=IPO_DB[s];
+    if(!stock){setResult({error:"Stock not in database yet."});return;}
     setLoading(true);
-    setTimeout(() => {
-      const r = analyzeStock(stock.date, TODAY);
-      const ceo = CEO_DB[s];
-      let ceoResult = null;
-      if (ceo && ceo.dob) {
-        ceoResult = analyzeStock(ceo.dob, TODAY);
-        ceoResult.ceoName = ceo.name;
-        ceoResult.ceoDob = ceo.dob;
+    setTimeout(()=>{
+      const transitArr=dateToArr(dateStr||selectedDate);
+      const r=calcScore(stock.date,transitArr);
+      const ceo=CEO_DB[s];
+      let ceoResult=null;
+      if(ceo&&ceo.dob){
+        ceoResult=calcScore(ceo.dob,transitArr);
+        ceoResult.ceoName=ceo.name;
+        ceoResult.ceoDob=ceo.dob;
       }
-      const combinedScore = ceoResult
-        ? Math.max(-10, Math.min(10, r.score * 0.6 + ceoResult.score * 0.4))
-        : r.score;
-      const combinedVerdict = combinedScore>=4?"STRONG BULL":combinedScore>=2?"BULLISH":combinedScore<=-4?"STRONG BEAR":combinedScore<=-2?"BEARISH":"NEUTRAL";
-      const combinedColor = combinedScore>=4?"#00e676":combinedScore>=2?"#38bdf8":combinedScore<=-4?"#ff1744":combinedScore<=-2?"#ff5252":"#f59e0b";
-      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date, ceoResult, combinedScore, combinedVerdict, combinedColor});
+      const combinedScore=ceoResult?Math.max(-10,Math.min(10,r.score*0.6+ceoResult.score*0.4)):r.score;
+      const combinedVerdict=combinedScore>=4?"STRONG BULL":combinedScore>=2?"BULLISH":combinedScore<=-4?"STRONG BEAR":combinedScore<=-2?"BEARISH":"NEUTRAL";
+      const combinedColor=combinedScore>=4?"#00e676":combinedScore>=2?"#38bdf8":combinedScore<=-4?"#ff1744":combinedScore<=-2?"#ff5252":"#f59e0b";
+      setResult({...r,symbol:s,name:stock.name,ipoDate:stock.date,ceoResult,combinedScore,combinedVerdict,combinedColor,analysisDate:dateStr||selectedDate});
       setLoading(false);
-    }, 100);
+    },100);
   };
 
-  const scanAll = () => {
-    setScanning(true);
-    setTimeout(() => {
-      const results = Object.entries(IPO_DB).map(([sym, info]) => {
-        const r = analyzeStock(info.date, TODAY);
-        const ceo = CEO_DB[sym];
-        let combined = r.score;
-        if (ceo && ceo.dob) {
-          const cr = analyzeStock(ceo.dob, TODAY);
-          combined = Math.max(-10, Math.min(10, r.score * 0.6 + cr.score * 0.4));
-        }
-        const verdict = combined>=4?"STRONG BULL":combined>=2?"BULLISH":combined<=-4?"STRONG BEAR":combined<=-2?"BEARISH":"NEUTRAL";
-        const verdictColor = combined>=4?"#00e676":combined>=2?"#38bdf8":combined<=-4?"#ff1744":combined<=-2?"#ff5252":"#f59e0b";
-        return {symbol:sym, name:info.name, score:combined, stockScore:r.score, verdict, verdictColor};
+  // ── Timeline: generate -90 to +90 days ────────────────────────────────────
+  const generateTimeline=(sym)=>{
+    const s=sym.toUpperCase().trim();
+    const stock=IPO_DB[s];
+    if(!stock)return;
+    const baseDate=new Date(selectedDate);
+    const points=[];
+    // Generate every 3 days for performance (-90 to +90 = 60 points)
+    for(let i=-90;i<=90;i+=3){
+      const d=new Date(baseDate);
+      d.setDate(d.getDate()+i);
+      const y=d.getFullYear(),m=d.getMonth()+1,day=d.getDate();
+      const r=calcScore(stock.date,[y,m,day]);
+      const ceo=CEO_DB[s];
+      let combined=r.score;
+      if(ceo&&ceo.dob){
+        const cr=calcScore(ceo.dob,[y,m,day]);
+        combined=Math.max(-10,Math.min(10,r.score*0.6+cr.score*0.4));
+      }
+      points.push({
+        date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
+        score:combined,
+        stockScore:r.score,
+        isToday:i===0,
+        isPast:i<0,
+        isFuture:i>0,
       });
-      results.sort((a,b) => b.score-a.score);
+    }
+    setTimelineData(points);
+    setShowTimeline(true);
+  };
+
+  const scanAll=()=>{
+    setScanning(true);
+    setTimeout(()=>{
+      const transitArr=dateToArr(selectedDate);
+      const results=Object.entries(IPO_DB).map(([sym,info])=>{
+        const r=calcScore(info.date,transitArr);
+        const ceo=CEO_DB[sym];
+        let combined=r.score;
+        if(ceo&&ceo.dob){const cr=calcScore(ceo.dob,transitArr);combined=Math.max(-10,Math.min(10,r.score*0.6+cr.score*0.4));}
+        const verdict=combined>=4?"STRONG BULL":combined>=2?"BULLISH":combined<=-4?"STRONG BEAR":combined<=-2?"BEARISH":"NEUTRAL";
+        const verdictColor=combined>=4?"#00e676":combined>=2?"#38bdf8":combined<=-4?"#ff1744":combined<=-2?"#ff5252":"#f59e0b";
+        return{symbol:sym,name:info.name,score:combined,stockScore:r.score,verdict,verdictColor};
+      });
+      results.sort((a,b)=>b.score-a.score);
       setScanResults(results);
       setScanning(false);
-    }, 200);
+    },200);
   };
 
-  const filteredScan = scanResults.filter(r => {
-    if (scanFilter==="BULL") return r.score>=2;
-    if (scanFilter==="BEAR") return r.score<=-2;
-    if (scanFilter==="STRONG") return Math.abs(r.score)>=4;
+  const filteredScan=scanResults.filter(r=>{
+    if(scanFilter==="BULL")return r.score>=2;
+    if(scanFilter==="BEAR")return r.score<=-2;
+    if(scanFilter==="STRONG")return Math.abs(r.score)>=4;
     return true;
   });
 
-  const scoreBar = (score) => {
-    const pct = ((score+10)/20)*100;
-    const color = score>=4?"#00e676":score>=2?"#38bdf8":score<=-4?"#ff1744":score<=-2?"#ff5252":"#f59e0b";
-    return (
-      <div style={{marginTop:6}}>
-        <div style={{height:6,background:"#1e3a5a",borderRadius:3,position:"relative"}}>
-          <div style={{position:"absolute",left:"50%",top:0,width:1,height:"100%",background:"#2a5a7a"}}/>
-          <div style={{height:"100%",width:pct+"%",background:color,borderRadius:3,transition:"width 0.8s ease"}}/>
+  const todayStr=new Date().toISOString().split("T")[0];
+  const isToday=selectedDate===todayStr;
+  const isFuture=selectedDate>todayStr;
+  const isPast=selectedDate<todayStr;
+
+  // ── Mini timeline SVG chart ────────────────────────────────────────────────
+  const renderTimeline=()=>{
+    if(!timelineData.length)return null;
+    const W=600,H=120,PAD=30;
+    const minS=Math.min(...timelineData.map(d=>d.score));
+    const maxS=Math.max(...timelineData.map(d=>d.score));
+    const range=Math.max(maxS-minS,1);
+    const toX=(i)=>PAD+(i/(timelineData.length-1))*(W-PAD*2);
+    const toY=(s)=>PAD+((maxS-s)/range)*(H-PAD*2);
+    const todayIdx=timelineData.findIndex(d=>d.isToday);
+
+    let path="";
+    let bullPath="",bearPath="";
+    timelineData.forEach((d,i)=>{
+      const x=toX(i),y=toY(d.score);
+      if(i===0)path=`M${x},${y}`;
+      else path+=` L${x},${y}`;
+    });
+
+    return(
+      <div style={{marginTop:14,background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:8,padding:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em"}}>ENERGY TIMELINE — 90 DAYS BACK & FORWARD FROM {selectedDate}</div>
+          <button onClick={()=>setShowTimeline(false)} style={{background:"none",border:"none",color:"#3a6e9a",cursor:"pointer",fontSize:11}}>✕</button>
         </div>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#3a6e9a",marginTop:2}}>
-          <span>BEARISH -10</span><span>NEUTRAL 0</span><span>BULLISH +10</span>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto"}}>
+          {/* Zero line */}
+          <line x1={PAD} y1={toY(0)} x2={W-PAD} y2={toY(0)} stroke="#1e3a5a" strokeWidth="1" strokeDasharray="4,4"/>
+          {/* +2 and -2 lines */}
+          <line x1={PAD} y1={toY(2)} x2={W-PAD} y2={toY(2)} stroke="#38bdf844" strokeWidth="1" strokeDasharray="2,4"/>
+          <line x1={PAD} y1={toY(-2)} x2={W-PAD} y2={toY(-2)} stroke="#ff525244" strokeWidth="1" strokeDasharray="2,4"/>
+          {/* Today vertical */}
+          {todayIdx>=0&&<line x1={toX(todayIdx)} y1={PAD} x2={toX(todayIdx)} y2={H-PAD} stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3,3"/>}
+          {/* Selected date vertical */}
+          <line x1={toX(Math.floor(timelineData.length/2))} y1={PAD} x2={toX(Math.floor(timelineData.length/2))} y2={H-PAD} stroke="#e040fb" strokeWidth="1" strokeDasharray="3,3"/>
+          {/* Score line */}
+          <path d={path} fill="none" stroke="#00e676" strokeWidth="1.5"/>
+          {/* Dots for key points */}
+          {timelineData.filter((_,i)=>i%10===0||timelineData[i].isToday).map((d,i)=>(
+            <circle key={i} cx={toX(timelineData.indexOf(d))} cy={toY(d.score)} r={d.isToday?4:2}
+              fill={d.score>=2?"#00e676":d.score<=-2?"#ff5252":"#f59e0b"}
+              stroke={d.isToday?"#f59e0b":"none"} strokeWidth="2"/>
+          ))}
+          {/* Labels */}
+          <text x={PAD} y={H-5} fill="#3a6e9a" fontSize="8">-90d</text>
+          <text x={W/2-8} y={H-5} fill="#f59e0b" fontSize="8">TODAY</text>
+          <text x={W-PAD-8} y={H-5} fill="#3a6e9a" fontSize="8">+90d</text>
+          <text x={PAD-2} y={toY(0)+4} fill="#3a6e9a" fontSize="7" textAnchor="end">0</text>
+          <text x={PAD-2} y={toY(2)+4} fill="#38bdf8" fontSize="7" textAnchor="end">+2</text>
+          <text x={PAD-2} y={toY(-2)+4} fill="#ff5252" fontSize="7" textAnchor="end">-2</text>
+        </svg>
+        {/* Peak/trough callouts */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+          {[...timelineData].sort((a,b)=>b.score-a.score).slice(0,3).map((d,i)=>(
+            <div key={i} style={{background:"#00e67611",border:"1px solid #00e67633",borderRadius:4,padding:"3px 8px",fontSize:10}}>
+              <span style={{color:"#00e676",fontWeight:700}}>▲ {d.score.toFixed(1)}</span>
+              <span style={{color:"#3a6e9a",marginLeft:4}}>{d.date}</span>
+              {d.isFuture&&<span style={{color:"#38bdf8",marginLeft:4,fontSize:9}}>FUTURE</span>}
+            </div>
+          ))}
+          {[...timelineData].sort((a,b)=>a.score-b.score).slice(0,3).map((d,i)=>(
+            <div key={i} style={{background:"#ff525211",border:"1px solid #ff525233",borderRadius:4,padding:"3px 8px",fontSize:10}}>
+              <span style={{color:"#ff5252",fontWeight:700}}>▼ {d.score.toFixed(1)}</span>
+              <span style={{color:"#3a6e9a",marginLeft:4}}>{d.date}</span>
+              {d.isFuture&&<span style={{color:"#38bdf8",marginLeft:4,fontSize:9}}>FUTURE</span>}
+            </div>
+          ))}
         </div>
       </div>
     );
   };
 
-  return (
+  return(
     <div style={{flex:1,overflowY:"auto",background:"#080e1a",color:"#e8f4ff",fontFamily:"monospace",padding:"12px 10px"}}>
       <div style={{maxWidth:900,margin:"0 auto"}}>
 
         {/* Header */}
-        <div style={{marginBottom:14}}>
+        <div style={{marginBottom:12}}>
           <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em"}}>ATM MACHINE v6.0</div>
           <div style={{fontSize:16,fontWeight:700}}>&#127756; Financial Astrology</div>
-          <div style={{fontSize:10,color:"#3a6e9a"}}>Stock natal chart analysis · Planetary transit energy</div>
+          <div style={{fontSize:10,color:"#3a6e9a"}}>Stock natal chart · CEO chart · Time travel ±90 days</div>
+        </div>
+
+        {/* ── GLOBAL DATE PICKER ── */}
+        <div style={{background:"#0d1e30",border:`1px solid ${isFuture?"#e040fb44":isPast?"#38bdf844":"#00e67644"}`,borderRadius:8,padding:"10px 14px",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em"}}>ANALYSIS DATE</div>
+            <input type="date" value={selectedDate}
+              onChange={e=>{setSelectedDate(e.target.value);setShowTimeline(false);setResult(null);setScanResults([]);}}
+              style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:4,color:"#e8f4ff",padding:"5px 10px",fontSize:12,fontFamily:"monospace"}}/>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[[-90,"−90d"],[-30,"−30d"],[-7,"−7d"],[0,"TODAY"],[7,"+7d"],[30,"+30d"],[90,"+90d"]].map(([days,label])=>(
+                <button key={days} onClick={()=>{
+                  const d=new Date();d.setDate(d.getDate()+days);
+                  const str=d.toISOString().split("T")[0];
+                  setSelectedDate(str);setShowTimeline(false);setResult(null);setScanResults([]);
+                }} style={{padding:"4px 8px",background:days===0&&isToday?"#00e67622":"#080e1a",border:`1px solid ${days===0&&isToday?"#00e676":"#1e3a5a"}`,borderRadius:4,color:days===0&&isToday?"#00e676":days>0?"#e040fb":days<0?"#38bdf8":"#3a6e9a",fontSize:10,cursor:"pointer",fontFamily:"monospace"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:isFuture?"#e040fb":isPast?"#38bdf8":"#00e676"}}>
+              {isFuture?"🔮 FUTURE":""}
+              {isPast?"📜 PAST":""}
+              {isToday?"✅ TODAY":""}
+            </div>
+          </div>
         </div>
 
         {/* View toggle */}
         <div style={{display:"flex",gap:4,marginBottom:14,background:"#0d1e30",borderRadius:6,padding:4}}>
-          {[["single","&#128269; Single Stock"],["scan","&#128202; Scan All 50"]].map(([id,label]) => (
-            <button key={id} onClick={()=>{setActiveView(id);if(id==="scan"&&scanResults.length===0)scanAll();}} style={{flex:1,padding:"7px 0",background:activeView===id?"#080e1a":"transparent",border:activeView===id?"1px solid #e040fb44":"1px solid transparent",borderRadius:4,color:activeView===id?"#e040fb":"#3a6e9a",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}} dangerouslySetInnerHTML={{__html:label}}/>
+          {[["single","&#128269; Single Stock"],["scan","&#128202; Scan All"]].map(([id,label])=>(
+            <button key={id} onClick={()=>{setActiveView(id);if(id==="scan"&&scanResults.length===0)scanAll();}}
+              style={{flex:1,padding:"7px 0",background:activeView===id?"#080e1a":"transparent",border:activeView===id?"1px solid #e040fb44":"1px solid transparent",borderRadius:4,color:activeView===id?"#e040fb":"#3a6e9a",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}
+              dangerouslySetInnerHTML={{__html:label}}/>
           ))}
         </div>
 
         {/* ── SINGLE STOCK VIEW ── */}
         {activeView==="single"&&(
           <div>
-            <div style={{display:"flex",gap:8,marginBottom:14}}>
-              <input
-                value={inputSym}
-                onChange={e=>setInputSym(e.target.value.toUpperCase())}
-                onKeyDown={e=>{if(e.key==="Enter"){setSymbol(inputSym);analyze(inputSym);}}}
-                placeholder="Type ticker... AAPL, NKE, SPY..."
-                style={{flex:1,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,color:"#e8f4ff",padding:"10px 14px",fontSize:13,fontFamily:"monospace"}}
-              />
-              <button onClick={()=>{setSymbol(inputSym);analyze(inputSym);}} style={{padding:"10px 20px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>ANALYZE</button>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input value={inputSym} onChange={e=>setInputSym(e.target.value.toUpperCase())}
+                onKeyDown={e=>{if(e.key==="Enter"){setSymbol(inputSym);analyze(inputSym,selectedDate);}}}
+                placeholder="Type ticker... NKE, SPY, AAPL..."
+                style={{flex:1,background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,color:"#e8f4ff",padding:"10px 14px",fontSize:13,fontFamily:"monospace"}}/>
+              <button onClick={()=>{setSymbol(inputSym);analyze(inputSym,selectedDate);}}
+                style={{padding:"10px 16px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>ANALYZE</button>
             </div>
 
             {/* Quick picks */}
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {["SPY","QQQ","AAPL","NVDA","TSLA","NKE","MSFT","META","AMZN","COIN","PLTR","MARA"].map(s=>(
-                <button key={s} onClick={()=>{setInputSym(s);setSymbol(s);analyze(s);}} style={{padding:"3px 10px",background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:4,color:"#3a6e9a",fontSize:10,cursor:"pointer",fontFamily:"monospace"}}>{s}</button>
+              {["SPY","QQQ","AAPL","NVDA","TSLA","NKE","MSFT","META","AMZN","COIN","PLTR","MARA","GLD","JPM","AMD"].map(s=>(
+                <button key={s} onClick={()=>{setInputSym(s);setSymbol(s);analyze(s,selectedDate);}}
+                  style={{padding:"3px 10px",background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:4,color:"#3a6e9a",fontSize:10,cursor:"pointer",fontFamily:"monospace"}}>{s}</button>
               ))}
             </div>
 
-            {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Reading planetary positions...</div>}
+            {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Calculating planetary positions...</div>}
 
-            {result&&result.error&&(
-              <div style={{background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:8,padding:16,color:"#f59e0b",fontSize:13}}>{result.error}</div>
-            )}
+            {result&&result.error&&<div style={{background:"#f59e0b11",border:"1px solid #f59e0b44",borderRadius:8,padding:16,color:"#f59e0b"}}>{result.error}</div>}
 
             {result&&!result.error&&(
               <div>
-                {/* Main verdict card */}
-                <div style={{background:"#0d1e30",border:"2px solid "+result.verdictColor+"44",borderRadius:10,padding:"20px",marginBottom:14}}>
+                {/* Main card */}
+                <div style={{background:"#0d1e30",border:`2px solid ${result.combinedColor}44`,borderRadius:10,padding:"18px 20px",marginBottom:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
                     <div>
-                      <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>PLANETARY ENERGY</div>
-                      <div style={{fontSize:22,fontWeight:700,color:"#e8f4ff"}}>{result.symbol} — {result.name}</div>
-                      <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]} · Today: {TODAY[2]}/{TODAY[1]}/{TODAY[0]}</div>
+                      <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:3}}>PLANETARY ENERGY · {result.analysisDate}</div>
+                      <div style={{fontSize:20,fontWeight:700}}>{result.symbol} — {result.name}</div>
+                      <div style={{fontSize:10,color:"#3a6e9a",marginTop:2}}>
+                        IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]}
+                        {result.analysisDate>todayStr&&<span style={{color:"#e040fb",marginLeft:8}}>🔮 FUTURE FORECAST</span>}
+                        {result.analysisDate<todayStr&&<span style={{color:"#38bdf8",marginLeft:8}}>📜 HISTORICAL</span>}
+                      </div>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:28,fontWeight:700,color:result.verdictColor}}>{result.score.toFixed(1)}</div>
-                      <div style={{fontSize:10,color:"#3a6e9a"}}>/ 10</div>
+                      <div style={{fontSize:32,fontWeight:700,color:result.combinedColor}}>{result.combinedScore.toFixed(1)}</div>
+                      <div style={{fontSize:9,color:"#3a6e9a"}}>/ 10 combined</div>
                     </div>
                   </div>
-                  <div style={{marginTop:14,background:result.verdictColor+"22",border:"1px solid "+result.verdictColor+"44",borderRadius:6,padding:"10px 14px",textAlign:"center"}}>
-                    <div style={{fontSize:18,fontWeight:700,color:result.verdictColor}}>{result.verdict}</div>
+                  <div style={{marginTop:14,background:result.combinedColor+"22",border:`1px solid ${result.combinedColor}44`,borderRadius:6,padding:"10px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:18,fontWeight:700,color:result.combinedColor}}>{result.combinedVerdict}</div>
                   </div>
-                  {scoreBar(result.score)}
+                  {/* Score bar */}
+                  <div style={{marginTop:10}}>
+                    <div style={{height:6,background:"#1e3a5a",borderRadius:3,position:"relative"}}>
+                      <div style={{position:"absolute",left:"50%",top:0,width:1,height:"100%",background:"#2a5a7a"}}/>
+                      <div style={{height:"100%",width:`${((result.combinedScore+10)/20)*100}%`,background:result.combinedColor,borderRadius:3,transition:"width 0.8s"}}/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#3a6e9a",marginTop:2}}>
+                      <span>BEARISH -10</span><span>NEUTRAL 0</span><span>BULLISH +10</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Timeline button */}
+                <button onClick={()=>{if(showTimeline){setShowTimeline(false);}else{generateTimeline(result.symbol);}}}
+                  style={{width:"100%",padding:"9px 0",background:"#e040fb11",border:"1px solid #e040fb44",borderRadius:6,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace",marginBottom:10}}>
+                  {showTimeline?"▲ HIDE TIMELINE":"📅 SHOW 180-DAY TIMELINE (−90 to +90 days)"}
+                </button>
+
+                {/* Timeline chart */}
+                {showTimeline&&renderTimeline()}
+
+                {/* Stock score vs CEO score */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                    <div style={{fontSize:9,color:"#3a6e9a",marginBottom:4}}>STOCK NATAL SCORE</div>
+                    <div style={{fontSize:18,fontWeight:700,color:result.verdictColor}}>{result.score.toFixed(1)}</div>
+                    <div style={{fontSize:11,color:result.verdictColor}}>{result.verdict}</div>
+                    <div style={{fontSize:9,color:"#3a6e9a",marginTop:4}}>IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]}</div>
+                  </div>
+                  {result.ceoResult&&(
+                    <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
+                      <div style={{fontSize:9,color:"#3a6e9a",marginBottom:4}}>CEO NATAL SCORE</div>
+                      <div style={{fontSize:18,fontWeight:700,color:result.ceoResult.verdictColor}}>{result.ceoResult.score.toFixed(1)}</div>
+                      <div style={{fontSize:11,color:result.ceoResult.verdictColor}}>{result.ceoResult.verdict}</div>
+                      <div style={{fontSize:9,color:"#3a6e9a",marginTop:4}}>{result.ceoResult.ceoName}</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Moon phase */}
-                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:14}}>
-                  <div style={{fontSize:28}}>{result.moonPhase.symbol}</div>
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:24}}>{result.moonPhase.split(" ")[0]}</div>
                   <div>
-                    <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:2}}>MOON PHASE TODAY</div>
-                    <div style={{fontSize:14,fontWeight:700,color:"#e8f4ff"}}>{result.moonPhase.name}</div>
-                    <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>{result.moonPhase.energy}</div>
+                    <div style={{fontSize:9,color:"#3a6e9a",marginBottom:2}}>MOON PHASE · {result.analysisDate}</div>
+                    <div style={{fontSize:13,fontWeight:700}}>{result.moonPhase.split(" ").slice(1).join(" ")}</div>
                   </div>
                 </div>
 
                 {/* Key aspects */}
-                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>ACTIVE PLANETARY ASPECTS (Transit → Natal)</div>
+                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
+                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>ACTIVE ASPECTS (Transit → Natal)</div>
                   {result.aspects.map((a,i)=>{
-                    const isPos = a.score>=0;
-                    const c = isPos?"#00e676":a.nature==="tense"?"#ff5252":"#f59e0b";
-                    return (
-                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #0d2030"}}>
-                        <div style={{width:6,height:6,borderRadius:"50%",background:c,flexShrink:0}}/>
-                        <div style={{flex:1}}>
+                    const isPos=a.score>=0;
+                    const c=isPos?"#00e676":a.nature==="tense"?"#ff5252":"#f59e0b";
+                    return(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #0d2030"}}>
+                        <div style={{width:5,height:5,borderRadius:"50%",background:c,flexShrink:0}}/>
+                        <div style={{flex:1,fontSize:11}}>
                           <span style={{color:"#38bdf8",fontWeight:700}}>{a.transit}</span>
-                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>in {a.tSign}</span>
+                          <span style={{color:"#3a6e9a",margin:"0 5px"}}>in {a.tSign}</span>
                           <span style={{color:c,fontWeight:700}}>{a.aspect}</span>
-                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>natal</span>
+                          <span style={{color:"#3a6e9a",margin:"0 5px"}}>natal</span>
                           <span style={{color:"#e8f4ff",fontWeight:700}}>{a.natal}</span>
-                          <span style={{color:"#3a6e9a",margin:"0 6px"}}>in {a.nSign}</span>
+                          <span style={{color:"#3a6e9a",margin:"0 5px"}}>in {a.nSign}</span>
                         </div>
                         <div style={{color:c,fontSize:11,fontWeight:700,flexShrink:0}}>{isPos?"+":""}{a.score.toFixed(2)}</div>
                         <div style={{fontSize:9,color:"#3a6e9a",flexShrink:0}}>{(a.exactness*100).toFixed(0)}%</div>
@@ -3472,28 +3349,14 @@ function FinancialAstrology({goToHTScanner}) {
                   })}
                 </div>
 
-                {/* Today's transiting planets */}
-                <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>TODAY'S PLANETARY POSITIONS</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
-                    {Object.entries(result.transit).map(([p,deg])=>(
-                      <div key={p} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:5,padding:"6px 10px"}}>
-                        <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2,textTransform:"uppercase"}}>{p}</div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#e8f4ff"}}>{deg.toFixed(1)}°</div>
-                        <div style={{fontSize:9,color:"#3a6e9a"}}>{signName(deg)}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Natal planets */}
+                {/* Today's transits */}
                 <div style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:8,padding:"12px 14px"}}>
-                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:10}}>{result.symbol} NATAL CHART (IPO DATE)</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
-                    {Object.entries(result.natal).map(([p,deg])=>(
-                      <div key={p} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:5,padding:"6px 10px"}}>
-                        <div style={{fontSize:8,color:"#3a6e9a",marginBottom:2,textTransform:"uppercase"}}>{p}</div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#e8f4ff"}}>{deg.toFixed(1)}°</div>
+                  <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>TRANSITING PLANETS · {result.analysisDate}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:6}}>
+                    {Object.entries(result.transit).map(([p,deg])=>(
+                      <div key={p} style={{background:"#080e1a",border:"1px solid #1e3a5a",borderRadius:5,padding:"6px 8px"}}>
+                        <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1,textTransform:"uppercase"}}>{p}</div>
+                        <div style={{fontSize:11,fontWeight:700}}>{deg.toFixed(1)}°</div>
                         <div style={{fontSize:9,color:"#3a6e9a"}}>{signName(deg)}</div>
                       </div>
                     ))}
@@ -3510,47 +3373,37 @@ function FinancialAstrology({goToHTScanner}) {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {[["ALL","ALL"],["BULL","BULLISH"],["BEAR","BEARISH"],["STRONG","STRONG ONLY"]].map(([f,l])=>(
-                  <button key={f} onClick={()=>setScanFilter(f)} style={{padding:"4px 12px",background:scanFilter===f?"#e040fb22":"#0d1e30",border:"1px solid "+(scanFilter===f?"#e040fb66":"#1e3a5a"),borderRadius:4,color:scanFilter===f?"#e040fb":"#3a6e9a",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{l}</button>
+                  <button key={f} onClick={()=>setScanFilter(f)}
+                    style={{padding:"4px 10px",background:scanFilter===f?"#e040fb22":"#0d1e30",border:`1px solid ${scanFilter===f?"#e040fb66":"#1e3a5a"}`,borderRadius:4,color:scanFilter===f?"#e040fb":"#3a6e9a",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{l}</button>
                 ))}
               </div>
-              <button onClick={scanAll} disabled={scanning} style={{padding:"5px 14px",background:"#e040fb11",border:"1px solid #e040fb55",borderRadius:5,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{scanning?"SCANNING...":"RESCAN ALL"}</button>
+              <button onClick={scanAll} disabled={scanning}
+                style={{padding:"5px 14px",background:"#e040fb11",border:"1px solid #e040fb55",borderRadius:5,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>{scanning?"SCANNING...":"RESCAN"}</button>
             </div>
 
-            {scanning&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Calculating planetary energy for all 50 stocks...</div>}
+            {scanning&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Calculating for {selectedDate}...</div>}
 
             {!scanning&&filteredScan.length>0&&(
               <div>
-                {/* HT Scanner Buttons */}
+                {/* HT buttons */}
                 {goToHTScanner&&<div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-                  <button onClick={()=>{
-                    const bullSyms = scanResults.filter(r=>r.score>=2).map(r=>r.symbol);
-                    if(bullSyms.length>0) goToHTScanner(bullSyms);
-                  }} style={{padding:"7px 14px",background:"#00e67622",border:"1px solid #00e67666",borderRadius:6,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
-                    &#9650; SCAN BULLISH IN HALFTREND ({scanResults.filter(r=>r.score>=2).length} stocks)
+                  <button onClick={()=>{const s=scanResults.filter(r=>r.score>=2).map(r=>r.symbol);if(s.length)goToHTScanner(s);}}
+                    style={{padding:"7px 14px",background:"#00e67622",border:"1px solid #00e67666",borderRadius:6,color:"#00e676",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9650; SCAN BULLISH IN HT ({scanResults.filter(r=>r.score>=2).length})
                   </button>
-                  <button onClick={()=>{
-                    const bearSyms = scanResults.filter(r=>r.score<=-2).map(r=>r.symbol);
-                    if(bearSyms.length>0) goToHTScanner(bearSyms);
-                  }} style={{padding:"7px 14px",background:"#ff525222",border:"1px solid #ff525266",borderRadius:6,color:"#ff5252",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
-                    &#9660; SCAN BEARISH IN HALFTREND ({scanResults.filter(r=>r.score<=-2).length} stocks)
+                  <button onClick={()=>{const s=scanResults.filter(r=>r.score<=-2).map(r=>r.symbol);if(s.length)goToHTScanner(s);}}
+                    style={{padding:"7px 14px",background:"#ff525222",border:"1px solid #ff525266",borderRadius:6,color:"#ff5252",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9660; SCAN BEARISH IN HT ({scanResults.filter(r=>r.score<=-2).length})
                   </button>
-                  <button onClick={()=>{
-                    const strongSyms = scanResults.filter(r=>Math.abs(r.score)>=4).map(r=>r.symbol);
-                    if(strongSyms.length>0) goToHTScanner(strongSyms);
-                  }} style={{padding:"7px 14px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
-                    &#9889; STRONG SIGNALS ONLY ({scanResults.filter(r=>Math.abs(r.score)>=4).length} stocks)
+                  <button onClick={()=>{const s=scanResults.filter(r=>Math.abs(r.score)>=4).map(r=>r.symbol);if(s.length)goToHTScanner(s);}}
+                    style={{padding:"7px 14px",background:"#e040fb22",border:"1px solid #e040fb66",borderRadius:6,color:"#e040fb",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>
+                    &#9889; STRONG ONLY ({scanResults.filter(r=>Math.abs(r.score)>=4).length})
                   </button>
                 </div>}
 
-                {/* Summary stats */}
-                <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-                  {[
-                    ["BULL",scanResults.filter(r=>r.score>=2).length,"#00e676"],
-                    ["BEAR",scanResults.filter(r=>r.score<=-2).length,"#ff5252"],
-                    ["NEUTRAL",scanResults.filter(r=>r.score>-2&&r.score<2).length,"#f59e0b"],
-                    ["STRONG BULL",scanResults.filter(r=>r.score>=4).length,"#00e676"],
-                    ["STRONG BEAR",scanResults.filter(r=>r.score<=-4).length,"#ff1744"],
-                  ].map(([l,v,c])=>(
+                {/* Stats */}
+                <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                  {[["BULL",scanResults.filter(r=>r.score>=2).length,"#00e676"],["BEAR",scanResults.filter(r=>r.score<=-2).length,"#ff5252"],["NEUTRAL",scanResults.filter(r=>r.score>-2&&r.score<2).length,"#f59e0b"],["STRONG BULL",scanResults.filter(r=>r.score>=4).length,"#00e676"],["STRONG BEAR",scanResults.filter(r=>r.score<=-4).length,"#ff1744"]].map(([l,v,c])=>(
                     <div key={l} style={{background:"#0d1e30",border:"1px solid #1e3a5a",borderRadius:6,padding:"7px 12px"}}>
                       <div style={{fontSize:8,color:"#3a6e9a",marginBottom:1}}>{l}</div>
                       <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
@@ -3562,7 +3415,7 @@ function FinancialAstrology({goToHTScanner}) {
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:400}}>
                     <thead>
                       <tr style={{borderBottom:"1px solid #1e3a5a"}}>
-                        {["SYMBOL","NAME","SCORE","ENERGY","ACTION"].map(h=>(
+                        {["SYMBOL","NAME","SCORE","STOCK","ENERGY",""].map(h=>(
                           <th key={h} style={{padding:"6px 8px",textAlign:"left",color:"#3a6e9a",fontSize:9,fontWeight:600}}>{h}</th>
                         ))}
                       </tr>
@@ -3570,21 +3423,27 @@ function FinancialAstrology({goToHTScanner}) {
                     <tbody>
                       {filteredScan.map((r,i)=>(
                         <tr key={r.symbol} style={{background:i%2===0?"#080e1a":"#0a1218",borderBottom:"1px solid #0d1e30",cursor:"pointer"}}
-                          onClick={()=>{setInputSym(r.symbol);setSymbol(r.symbol);analyze(r.symbol);setActiveView("single");}}>
+                          onClick={()=>{setInputSym(r.symbol);setSymbol(r.symbol);analyze(r.symbol,selectedDate);setActiveView("single");}}>
                           <td style={{padding:"7px 8px",fontWeight:700,color:"#38bdf8"}}>{r.symbol}</td>
                           <td style={{padding:"7px 8px",color:"#3a6e9a",fontSize:10}}>{r.name}</td>
+                          <td style={{padding:"7px 8px",color:r.verdictColor,fontWeight:700}}>{r.score.toFixed(1)}</td>
+                          <td style={{padding:"7px 8px",color:"#3a6e9a",fontSize:10}}>{r.stockScore.toFixed(1)}</td>
                           <td style={{padding:"7px 8px"}}>
-                            <span style={{color:r.verdictColor,fontWeight:700}}>{r.score.toFixed(1)}</span>
+                            <span style={{background:r.verdictColor+"22",color:r.verdictColor,border:`1px solid ${r.verdictColor}44`,borderRadius:4,padding:"1px 8px",fontSize:10,fontWeight:700}}>{r.verdict}</span>
                           </td>
-                          <td style={{padding:"7px 8px"}}>
-                            <span style={{background:r.verdictColor+"22",color:r.verdictColor,border:"1px solid "+r.verdictColor+"44",borderRadius:4,padding:"1px 8px",fontSize:10,fontWeight:700}}>{r.verdict}</span>
-                          </td>
-                          <td style={{padding:"7px 8px",fontSize:9,color:"#3a6e9a"}}>click to analyze</td>
+                          <td style={{padding:"7px 8px",fontSize:9,color:"#3a6e9a"}}>→ details</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {!scanning&&scanResults.length===0&&(
+              <div style={{textAlign:"center",padding:40,color:"#3a6e9a"}}>
+                <div style={{fontSize:24,marginBottom:8}}>&#127756;</div>
+                Press RESCAN to analyze all stocks for {selectedDate}
               </div>
             )}
           </div>
@@ -3594,6 +3453,7 @@ function FinancialAstrology({goToHTScanner}) {
     </div>
   );
 }
+
 
 
 // ─── CHART TAB ────────────────────────────────────────────────────────────────
