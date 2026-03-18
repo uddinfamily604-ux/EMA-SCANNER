@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import MoonCalendar from './MoonCalendar';
+import MarketOracle from './MarketOracle';
 
 // ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
 function useMobile() {
@@ -4995,6 +4997,7 @@ export default function App(){
   const [logVersion,setLogVersion]=useState(0);
   const [flashAlert,setFlashAlert]=useState(null);
   const [chartSym,setChartSym]=useState("SPY");
+  const [oracleDate,setOracleDate]=useState(null);
   const [filtering,setFiltering]=useState(false);
   const [filterProg,setFilterProg]=useState(null);
   const [minPrice,setMinPrice]=useState(20);
@@ -5054,6 +5057,8 @@ export default function App(){
       {id:"premarket",label:"🌙 PRE+HOD", color:"#f59e0b"},
       {id:"astro",   label:"🪐 ASTRO",    color:"#e040fb"},
       {id:"human",   label:"🧬 HUMAN",    color:"#00e676"},
+      {id:"moon",    label:"🌙 MOON CAL", color:"#00b4d8"},
+      {id:"oracle",  label:"🔮 ORACLE",   color:"#e040fb"},
     ],
   ];
   const tabs = tabRows.flat();
@@ -5146,6 +5151,19 @@ export default function App(){
           {activeTab==="premarket"&&<PreMarketHODLOD/>}
           {activeTab==="astro"&&<FinancialAstrology goToHTScanner={goToHTScanner}/>}
           {activeTab==="human"&&<HumanEnergyReader/>}
+           {activeTab==="moon"&&(
+  <div style={{flex:1,overflowY:"auto",background:"#080e1a",padding:"14px"}}>
+    <MoonCalendar onDateSelect={(y,m,d)=>{
+      setOracleDate(`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+      updateTab("oracle");
+    }}/>
+  </div>
+)}
+{activeTab==="oracle"&&(
+  <div style={{flex:1,overflowY:"auto",background:"#080e1a",padding:"14px"}}>
+    <MarketOracle initialDate={oracleDate}/>
+  </div>
+)}
         </div>
 
         {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
