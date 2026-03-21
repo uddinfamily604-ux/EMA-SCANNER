@@ -2,12 +2,6 @@ import { useState } from "react";
 
 var API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
 
-var TIMEFRAMES_BT = [
-  { label: "5 MIN",  multiplier: 5,  timespan: "minute" },
-  { label: "2 MIN",  multiplier: 2,  timespan: "minute" },
-  { label: "15 SEC", multiplier: 15, timespan: "second" },
-];
-
 function btCalcSHA(candles) {
   if (candles.length < 5) return [];
   var k = 2 / 4;
@@ -96,7 +90,7 @@ async function btFetchCandles(symbol, multiplier, timespan, fromStr, toStr) {
 function btGetDateRange(days) {
   var to   = new Date();
   var from = new Date();
-  from.setDate(from.getDate() - days * 2);
+  from.setDate(from.getDate() - Math.ceil(days * 1.5));
   return {
     from: from.toISOString().split("T")[0],
     to:   to.toISOString().split("T")[0]
@@ -116,8 +110,10 @@ function btCalcStats(trades) {
   var profFactor = lossPnl > 0 ? (winPnl / lossPnl).toFixed(2) : "INF";
   var longs  = trades.filter(function(t){return t.dir==="BUY";}).length;
   var shorts = trades.filter(function(t){return t.dir==="SELL";}).length;
-  var longWR  = longs  > 0 ? (trades.filter(function(t){return t.dir==="BUY"  && t.win;}).length / longs  * 100).toFixed(0) : "0";
-  var shortWR = shorts > 0 ? (trades.filter(function(t){return t.dir==="SELL" && t.win;}).length / shorts * 100).toFixed(0) : "0";
+  var longWins  = trades.filter(function(t){return t.dir==="BUY"  && t.win;}).length;
+  var shortWins = trades.filter(function(t){return t.dir==="SELL" && t.win;}).length;
+  var longWR  = longs  > 0 ? (longWins  / longs  * 100).toFixed(0) : "0";
+  var shortWR = shorts > 0 ? (shortWins / shorts * 100).toFixed(0) : "0";
   var avgBars = total > 0 ? (trades.reduce(function(a,t){return a+t.barsHeld;},0)/total).toFixed(1) : "0";
   var equity = 0;
   var curve = trades.map(function(t){
@@ -133,8 +129,8 @@ function btCalcStats(trades) {
   };
 }
 
-async function btRunBacktest(symbol, days, exitBars, onProgress) {
-  var range = btGetDateRange(days + 3);
+async function btRunBacktest(symbol, days, exitBars, direction, onProgress) {
+  var range = btGetDateRange(days);
 
   onProgress("Fetching 5min candles...");
   var c5m  = await btFetchCandles(symbol, 5,  "minute", range.from, range.to);
@@ -176,10 +172,11 @@ async function btRunBacktest(symbol, days, exitBars, onProgress) {
     var inTrade = false, entryIdx = -1, entryPrice = 0, entryDir = null;
 
     for (var ii = 30; ii < c15s.length - exitBars - 1; ii++) {
-      var barTs   = c15s[ii].t;
-      var etHour  = new Date(barTs).getUTCHours() - 5;
-      var etMins  = etHour * 60 + new Date(barTs).getUTCMinutes();
-      if (etMins < 570 || etMins > 810) continue;
+      var barTs  = c15s[ii].t;
+      var d      = new Date(barTs);
+      var etH    = d.getUTCHours() - 5;
+      var etM    = etH * 60 + d.getUTCMinutes();
+      if (etM < 570 || etM > 810) continue;
 
       if (inTrade) {
         var barsHeld = ii - entryIdx;
@@ -198,7 +195,7 @@ async function btRunBacktest(symbol, days, exitBars, onProgress) {
 
           trades.push({
             entryTime:  new Date(c15s[entryIdx].t).toLocaleString("en-US", {timeZone:"America/New_York"}),
-            exitTime:   new Date(c15s[ii].t).toLocaleString("en-US",       {timeZone:"America/New_York"}),
+            exitTime:   new Date(c15s[ii].t).toLocaleString("en-US", {timeZone:"America/New_York"}),
             dir:        entryDir,
             entry:      entryPrice.toFixed(2),
             exit:       exitPrice.toFixed(2),
@@ -214,15 +211,18 @@ async function btRunBacktest(symbol, days, exitBars, onProgress) {
         continue;
       }
 
-      var s5  = nearestSig(sig5m, barTs, 5 * 60 * 1000);
-      var s2  = nearestSig(sig2m, barTs, 2 * 60 * 1000);
+      var s5 = nearestSig(sig5m, barTs, 5 * 60 * 1000);
+      var s2 = nearestSig(sig2m, barTs, 2 * 60 * 1000);
       if (!s5 || !s2) continue;
 
-      if (s5 === "BUY" && s2 === "BUY") {
+      var canLong  = (direction === "BOTH" || direction === "BUY")  && s5 === "BUY"  && s2 === "BUY";
+      var canShort = (direction === "BOTH" || direction === "SELL") && s5 === "SELL" && s2 === "SELL";
+
+      if (canLong) {
         inTrade = true; entryIdx = ii + 1;
         entryPrice = c15s[ii+1] ? c15s[ii+1].o : c15s[ii].c;
         entryDir = "BUY";
-      } else if (s5 === "SELL" && s2 === "SELL") {
+      } else if (canShort) {
         inTrade = true; entryIdx = ii + 1;
         entryPrice = c15s[ii+1] ? c15s[ii+1].o : c15s[ii].c;
         entryDir = "SELL";
@@ -233,14 +233,12 @@ async function btRunBacktest(symbol, days, exitBars, onProgress) {
 
   onProgress("Simulating FIXED exit...");
   var fixed = btCalcStats(simulate("FIXED"));
-
   onProgress("Simulating FLIP exit...");
   var flip  = btCalcStats(simulate("FLIP"));
-
   onProgress("Simulating BEST exit...");
   var best  = btCalcStats(simulate("BEST"));
 
-  return { fixed: fixed, flip: flip, best: best, symbol: symbol, days: days, exitBars: exitBars };
+  return { fixed: fixed, flip: flip, best: best, symbol: symbol, days: days, exitBars: exitBars, direction: direction };
 }
 
 function BtEquityCurve(props) {
@@ -258,7 +256,6 @@ function BtEquityCurve(props) {
   var polyPts = toX(0)+","+zero+" "
     + curve.map(function(v,i){return toX(i)+","+toY(v);}).join(" ")
     + " "+toX(curve.length-1)+","+zero;
-
   return (
     <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
       <defs>
@@ -268,7 +265,7 @@ function BtEquityCurve(props) {
         </linearGradient>
       </defs>
       <line x1={PAD} y1={zero} x2={W-PAD} y2={zero} stroke="#1e1e2e" strokeWidth="1" strokeDasharray="3,3"/>
-      <polygon points={polyPts} fill={"url(#g"+color.replace("#","")+")"}/>
+      <polygon points={polyPts} fill={"url(#g"+color.replace("#","")+")"} />
       <path d={path} fill="none" stroke={color} strokeWidth="2"/>
       <text x={W-PAD} y={H-3} fill={color} fontSize="9" textAnchor="end">
         {curve.length} trades / ${curve[curve.length-1]}
@@ -281,7 +278,6 @@ function BtModeCard(props) {
   var data = props.data, label = props.label, color = props.color, desc = props.desc;
   var wr = parseFloat(data.winRate);
   var pnlC = parseFloat(data.totalPnl) >= 0 ? "#00e87a" : "#ff3c3c";
-
   return (
     <div style={{background:"#0e0e1a",border:"2px solid "+color+"44",borderRadius:12,
       padding:"16px",flex:1,minWidth:220,display:"flex",flexDirection:"column",gap:8}}>
@@ -335,7 +331,6 @@ function BtTradeTable(props) {
   var trades = props.trades;
   var filter = props.filter;
   var setFilter = props.setFilter;
-
   var filtered = trades.filter(function(t) {
     if (filter==="WIN")   return t.win;
     if (filter==="LOSS")  return !t.win;
@@ -344,7 +339,6 @@ function BtTradeTable(props) {
     if (filter==="FLIP")  return t.exitReason==="FLIP";
     return true;
   });
-
   return (
     <div style={{background:"#0e0e1a",border:"1px solid #1e1e2e",borderRadius:10,padding:"14px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
@@ -384,7 +378,7 @@ function BtTradeTable(props) {
                     <span style={{padding:"2px 6px",borderRadius:3,fontSize:9,fontWeight:700,
                       background:t.dir==="BUY"?"#00e87a22":"#ff3c3c22",color:dc,
                       border:"1px solid "+(t.dir==="BUY"?"#00e87a44":"#ff3c3c44")}}>
-                      {t.dir==="BUY"?"UP":"DN"} {t.dir==="BUY"?"LONG":"SHORT"}
+                      {t.dir==="BUY"?"▲ LONG":"▼ SHORT"}
                     </span>
                   </td>
                   <td style={{padding:"6px 8px",color:"#555577",fontSize:10,whiteSpace:"nowrap"}}>{t.entryTime}</td>
@@ -420,36 +414,51 @@ function BtTradeTable(props) {
 }
 
 export default function ScalpBacktest() {
-  var symbolState    = useState("SPY");
-  var symbol         = symbolState[0], setSymbol = symbolState[1];
+  var symbolState   = useState("SPY");
+  var symbol        = symbolState[0], setSymbol = symbolState[1];
 
-  var daysState      = useState(5);
-  var days           = daysState[0], setDays = daysState[1];
+  var daysState     = useState(5);
+  var days          = daysState[0], setDays = daysState[1];
 
-  var exitBarsState  = useState(7);
-  var exitBars       = exitBarsState[0], setExitBars = exitBarsState[1];
+  var exitBarsState = useState(7);
+  var exitBars      = exitBarsState[0], setExitBars = exitBarsState[1];
 
-  var runningState   = useState(false);
-  var running        = runningState[0], setRunning = runningState[1];
+  var exitBarsInputState = useState("7");
+  var exitBarsInput      = exitBarsInputState[0], setExitBarsInput = exitBarsInputState[1];
 
-  var progressState  = useState("");
-  var progress       = progressState[0], setProgress = progressState[1];
+  var directionState = useState("BOTH");
+  var direction      = directionState[0], setDirection = directionState[1];
 
-  var resultState    = useState(null);
-  var result         = resultState[0], setResult = resultState[1];
+  var runningState  = useState(false);
+  var running       = runningState[0], setRunning = runningState[1];
 
-  var errorState     = useState(null);
-  var error          = errorState[0], setError = errorState[1];
+  var progressState = useState("");
+  var progress      = progressState[0], setProgress = progressState[1];
 
-  var modeState      = useState("fixed");
-  var activeMode     = modeState[0], setActiveMode = modeState[1];
+  var resultState   = useState(null);
+  var result        = resultState[0], setResult = resultState[1];
 
-  var filterState    = useState("ALL");
-  var filter         = filterState[0], setFilter = filterState[1];
+  var errorState    = useState(null);
+  var error         = errorState[0], setError = errorState[1];
+
+  var modeState     = useState("fixed");
+  var activeMode    = modeState[0], setActiveMode = modeState[1];
+
+  var filterState   = useState("ALL");
+  var filter        = filterState[0], setFilter = filterState[1];
+
+  function handleExitBarsChange(val) {
+    setExitBarsInput(val);
+    var n = parseInt(val);
+    if (!isNaN(n) && n >= 1 && n <= 200) setExitBars(n);
+  }
 
   function run() {
+    var bars = parseInt(exitBarsInput);
+    if (isNaN(bars) || bars < 1) { setError("Enter a valid bar count (1-200)"); return; }
+    setExitBars(bars);
     setRunning(true); setResult(null); setError(null); setProgress("Starting...");
-    btRunBacktest(symbol.toUpperCase(), days, exitBars, setProgress).then(function(r) {
+    btRunBacktest(symbol.toUpperCase(), days, bars, direction, setProgress).then(function(r) {
       if (r.error) { setError(r.error); }
       else { setResult(r); setActiveMode("fixed"); }
       setRunning(false); setProgress("");
@@ -460,9 +469,9 @@ export default function ScalpBacktest() {
   }
 
   var modes = [
-    { key:"fixed", label:"FIXED",  color:"#00e87a", desc:"Exit after exactly "+exitBars+" bars ("+exitBars*15+"sec)" },
-    { key:"flip",  label:"FLIP",   color:"#e040fb", desc:"Exit on 15sec SHA+HT flip OR "+exitBars+" bars max" },
-    { key:"best",  label:"BEST",   color:"#f59e0b", desc:"Min 4 bars held + flip OR "+exitBars+" bars max" },
+    { key:"fixed", label:"FIXED",  color:"#00e87a", desc:"Exit after exactly "+exitBars+" bars ("+(exitBars*15)+"sec)" },
+    { key:"flip",  label:"FLIP",   color:"#e040fb", desc:"Exit on 15sec flip OR "+exitBars+" bars max" },
+    { key:"best",  label:"BEST",   color:"#f59e0b", desc:"Min 4 bars + flip OR "+exitBars+" bars max" },
   ];
 
   var winner = null;
@@ -472,6 +481,18 @@ export default function ScalpBacktest() {
       return parseFloat(result[b].winRate) - parseFloat(result[a].winRate);
     })[0];
   }
+
+  var dirBtnStyle = function(d) {
+    var active = direction === d;
+    var col = d==="BUY"?"#00e87a":d==="SELL"?"#ff3c3c":"#f59e0b";
+    return {
+      padding:"8px 14px", fontSize:11, fontFamily:"inherit", fontWeight:700,
+      background: active ? col+"22" : "transparent",
+      border: "2px solid " + (active ? col : "#2a2a4a"),
+      color: active ? col : "#444466",
+      borderRadius:6, cursor:"pointer"
+    };
+  };
 
   return (
     <div style={{minHeight:"100vh",background:"#07070f",fontFamily:"'Courier New',monospace",
@@ -483,55 +504,99 @@ export default function ScalpBacktest() {
         <div style={{marginBottom:20}}>
           <div style={{fontSize:10,color:"#00e87a",letterSpacing:4,marginBottom:4}}>ATM MACHINE — BACKTEST ENGINE</div>
           <div style={{fontSize:22,fontWeight:700,letterSpacing:2}}>SCALP BACKTESTER</div>
-          <div style={{fontSize:10,color:"#333355",marginTop:4}}>SHA + HALFTREND - 5MIN + 2MIN ENTRY - 3 EXIT STRATEGIES</div>
+          <div style={{fontSize:10,color:"#333355",marginTop:4}}>SHA + HALFTREND · 5MIN + 2MIN ENTRY · 3 EXIT STRATEGIES · BUY / SELL / BOTH</div>
         </div>
 
-        <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",
-          background:"#0e0e1a",border:"1px solid #1e1e2e",borderRadius:12,
-          padding:"16px 18px",marginBottom:20}}>
-          <div>
-            <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>SYMBOL</div>
-            <input value={symbol} onChange={function(e){setSymbol(e.target.value.toUpperCase());}}
-              style={{width:80,background:"#07070f",border:"2px solid #2a2a4a",borderRadius:6,
-                color:"#00e87a",padding:"8px 10px",fontSize:16,fontFamily:"inherit",
-                fontWeight:700,outline:"none",textAlign:"center"}}/>
+        {/* CONTROLS */}
+        <div style={{background:"#0e0e1a",border:"1px solid #1e1e2e",borderRadius:12,
+          padding:"16px 18px",marginBottom:20,display:"flex",flexDirection:"column",gap:14}}>
+
+          {/* Row 1: Symbol + Days + Bars */}
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <div>
+              <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>SYMBOL</div>
+              <input value={symbol} onChange={function(e){setSymbol(e.target.value.toUpperCase());}}
+                style={{width:80,background:"#07070f",border:"2px solid #2a2a4a",borderRadius:6,
+                  color:"#00e87a",padding:"8px 10px",fontSize:16,fontFamily:"inherit",
+                  fontWeight:700,outline:"none",textAlign:"center"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>DAYS BACK</div>
+              <select value={days} onChange={function(e){setDays(Number(e.target.value));}}
+                style={{background:"#07070f",border:"2px solid #2a2a4a",borderRadius:6,
+                  color:"#e0e0ff",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none"}}>
+                <option value={1}>1 day</option>
+                <option value={3}>3 days</option>
+                <option value={5}>5 days</option>
+                <option value={10}>10 days</option>
+                <option value={15}>15 days</option>
+                <option value={20}>20 days</option>
+                <option value={30}>30 days</option>
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>MAX EXIT BARS (type any #)</div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <input
+                  value={exitBarsInput}
+                  onChange={function(e){handleExitBarsChange(e.target.value);}}
+                  placeholder="7"
+                  style={{width:70,background:"#07070f",border:"2px solid #f59e0b",borderRadius:6,
+                    color:"#f59e0b",padding:"8px 10px",fontSize:16,fontFamily:"inherit",
+                    fontWeight:700,outline:"none",textAlign:"center"}}/>
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {[4,7,10,15,20].map(function(n) {
+                    return (
+                      <button key={n} onClick={function(){setExitBarsInput(String(n));setExitBars(n);}}
+                        style={{padding:"2px 8px",fontSize:9,fontFamily:"inherit",fontWeight:700,
+                          background:exitBars===n?"#f59e0b22":"transparent",
+                          border:"1px solid "+(exitBars===n?"#f59e0b":"#2a2a4a"),
+                          color:exitBars===n?"#f59e0b":"#444466",
+                          borderRadius:3,cursor:"pointer"}}>
+                        {n}b={n*15}s
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{fontSize:9,color:"#333355",marginTop:4}}>
+                {exitBars} bars = {exitBars*15} seconds hold time
+              </div>
+            </div>
           </div>
+
+          {/* Row 2: Direction */}
           <div>
-            <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>DAYS</div>
-            <select value={days} onChange={function(e){setDays(Number(e.target.value));}}
-              style={{background:"#07070f",border:"2px solid #2a2a4a",borderRadius:6,
-                color:"#e0e0ff",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none"}}>
-              <option value={1}>1 day</option>
-              <option value={3}>3 days</option>
-              <option value={5}>5 days</option>
-              <option value={10}>10 days</option>
-            </select>
+            <div style={{fontSize:9,color:"#555577",marginBottom:6,letterSpacing:1}}>DIRECTION FILTER</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={function(){setDirection("BOTH");}} style={dirBtnStyle("BOTH")}>
+                ⇅ BOTH (Long + Short)
+              </button>
+              <button onClick={function(){setDirection("BUY");}} style={dirBtnStyle("BUY")}>
+                ▲ BUY ONLY (Long)
+              </button>
+              <button onClick={function(){setDirection("SELL");}} style={dirBtnStyle("SELL")}>
+                ▼ SELL ONLY (Short)
+              </button>
+            </div>
+            <div style={{fontSize:9,color:"#333355",marginTop:6}}>
+              {direction==="BOTH"?"Testing both long and short setups":
+               direction==="BUY"?"Testing BUY signals only — 5m+2m both BULL":
+               "Testing SELL signals only — 5m+2m both BEAR"}
+            </div>
           </div>
-          <div>
-            <div style={{fontSize:9,color:"#555577",marginBottom:4,letterSpacing:1}}>MAX EXIT BARS</div>
-            <select value={exitBars} onChange={function(e){setExitBars(Number(e.target.value));}}
-              style={{background:"#07070f",border:"2px solid #2a2a4a",borderRadius:6,
-                color:"#e0e0ff",padding:"8px 10px",fontSize:13,fontFamily:"inherit",outline:"none"}}>
-              <option value={4}>4 bars (60sec)</option>
-              <option value={5}>5 bars (75sec)</option>
-              <option value={6}>6 bars (90sec)</option>
-              <option value={7}>7 bars (105sec)</option>
-              <option value={8}>8 bars (120sec)</option>
-              <option value={10}>10 bars (150sec)</option>
-            </select>
-          </div>
+
+          {/* Run button */}
           <button onClick={run} disabled={running} style={{
-            padding:"10px 24px",
+            padding:"12px 32px", alignSelf:"flex-start",
             background:running?"#0e0e1a":"#00e87a22",
             border:"2px solid "+(running?"#2a2a4a":"#00e87a"),
             borderRadius:8,color:running?"#444466":"#00e87a",
-            fontSize:12,fontFamily:"inherit",fontWeight:700,
+            fontSize:13,fontFamily:"inherit",fontWeight:700,
             cursor:running?"not-allowed":"pointer",letterSpacing:1}}>
-            {running?"RUNNING...":"RUN BACKTEST"}
+            {running?"⏳ RUNNING...":"▶ RUN BACKTEST"}
           </button>
-          {running && (
-            <div style={{fontSize:10,color:"#00e87a"}}>{progress}</div>
-          )}
+          {running && <div style={{fontSize:10,color:"#00e87a"}}>{progress}</div>}
         </div>
 
         {error && (
@@ -543,21 +608,24 @@ export default function ScalpBacktest() {
 
         {result && (
           <div>
-            {winner && (
-              <div style={{background:"#0a1a0a",border:"2px solid #00e87a66",
-                borderRadius:10,padding:"12px 18px",marginBottom:18,
-                display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                <div style={{fontSize:11,color:"#00e87a",letterSpacing:2}}>BEST STRATEGY</div>
-                <div style={{fontSize:18,fontWeight:700,
-                  color:modes.filter(function(m){return m.key===winner;})[0].color}}>
-                  {modes.filter(function(m){return m.key===winner;})[0].label} — {result[winner].winRate}% WIN RATE
-                </div>
-                <div style={{fontSize:10,color:"#555577"}}>
-                  {result[winner].total} trades / ${result[winner].totalPnl} total / Prof factor {result[winner].profFactor}
-                </div>
+            {/* Summary bar */}
+            <div style={{background:"#0a1a0a",border:"2px solid #00e87a66",
+              borderRadius:10,padding:"12px 18px",marginBottom:18,
+              display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:"#00e87a",letterSpacing:2}}>BEST STRATEGY</div>
+              <div style={{fontSize:18,fontWeight:700,
+                color:modes.filter(function(m){return m.key===winner;})[0].color}}>
+                {modes.filter(function(m){return m.key===winner;})[0].label} — {result[winner].winRate}% WIN RATE
               </div>
-            )}
+              <div style={{fontSize:10,color:"#555577"}}>
+                {result[winner].total} trades · ${result[winner].totalPnl} total · PF {result[winner].profFactor}
+              </div>
+              <div style={{marginLeft:"auto",fontSize:10,color:"#555577"}}>
+                {result.days}d · {result.exitBars} bars · {result.direction}
+              </div>
+            </div>
 
+            {/* 3 strategy cards */}
             <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:18}}>
               {modes.map(function(m) {
                 return (
@@ -567,8 +635,9 @@ export default function ScalpBacktest() {
               })}
             </div>
 
-            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-              <div style={{fontSize:10,color:"#555577",alignSelf:"center"}}>VIEW TRADES:</div>
+            {/* Trade log tabs */}
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+              <div style={{fontSize:10,color:"#555577"}}>VIEW TRADES:</div>
               {modes.map(function(m) {
                 return (
                   <button key={m.key}
@@ -599,12 +668,13 @@ export default function ScalpBacktest() {
 
         {!result && !running && (
           <div style={{textAlign:"center",padding:"60px 20px",color:"#222233"}}>
-            <div style={{fontSize:36,marginBottom:12,color:"#1a1a2a"}}>TEST</div>
-            <div style={{fontSize:12,letterSpacing:2,color:"#333355"}}>PRESS RUN BACKTEST</div>
-            <div style={{fontSize:10,marginTop:10,color:"#1e1e2e",lineHeight:2}}>
-              FIXED: exit after N bars<br/>
-              FLIP: exit on 15sec reversal<br/>
-              BEST: min 4 bars then flip
+            <div style={{fontSize:48,marginBottom:12}}>🧪</div>
+            <div style={{fontSize:14,letterSpacing:2,color:"#333355",marginBottom:8}}>SCALP BACKTESTER</div>
+            <div style={{fontSize:10,color:"#1e1e2e",lineHeight:2.2}}>
+              ⇅ BOTH — test longs and shorts together<br/>
+              ▲ BUY ONLY — find best long setup<br/>
+              ▼ SELL ONLY — find best short setup<br/>
+              Type any bar count · 30 days available
             </div>
           </div>
         )}
