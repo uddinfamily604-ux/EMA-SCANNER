@@ -3,527 +3,339 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const API_KEY = "FIQhyE6XxRGLucP_Du2har6r4oHZsca3";
 
 const TIMEFRAMES = [
-  { label: "5 MIN", seconds: 300, multiplier: 5, timespan: "minute", required: true },
-  { label: "2 MIN", seconds: 120, multiplier: 2, timespan: "minute", required: true },
-  { label: "30 SEC", seconds: 30, multiplier: 30, timespan: "second", required: false },
-  { label: "15 SEC", seconds: 15, multiplier: 15, timespan: "second", required: false },
+  { label: "5 MIN",  multiplier: 5,  timespan: "minute", required: true  },
+  { label: "2 MIN",  multiplier: 2,  timespan: "minute", required: true  },
+  { label: "30 SEC", multiplier: 30, timespan: "second", required: false },
+  { label: "15 SEC", multiplier: 15, timespan: "second", required: false },
 ];
 
-// === SHA (Smoothed Heikin Ashi) ===
-function calcSHA(candles, smooth = 3) {
-  if (candles.length < 2) return [];
-  // Step 1: Heikin Ashi
-  let ha = [];
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const haClose = (c.o + c.h + c.l + c.c) / 4;
-    const haOpen = i === 0 ? (c.o + c.c) / 2 : (ha[i - 1].o + ha[i - 1].c) / 2;
-    const haHigh = Math.max(c.h, haOpen, haClose);
-    const haLow = Math.min(c.l, haOpen, haClose);
-    ha.push({ o: haOpen, h: haHigh, l: haLow, c: haClose });
+function calcSHA(candles) {
+  var smooth = 3;
+  if (candles.length < smooth + 2) return [];
+  var k = 2 / (smooth + 1);
+  var ha = [];
+  for (var i = 0; i < candles.length; i++) {
+    var c = candles[i];
+    var haC = (c.o + c.h + c.l + c.c) / 4;
+    var haO = i === 0 ? (c.o + c.c) / 2 : (ha[i-1].o + ha[i-1].c) / 2;
+    ha.push({ o: haO, c: haC });
   }
-  // Step 2: EMA smooth
-  function ema(arr, period) {
-    const k = 2 / (period + 1);
-    let result = [arr[0]];
-    for (let i = 1; i < arr.length; i++) {
-      result.push(arr[i] * k + result[i - 1] * (1 - k));
-    }
-    return result;
+  var sO = ha[0].o, sC = ha[0].c;
+  var result = [];
+  for (var j = 0; j < ha.length; j++) {
+    if (j === 0) { sO = ha[0].o; sC = ha[0].c; }
+    else { sO = ha[j].o * k + sO * (1 - k); sC = ha[j].c * k + sC * (1 - k); }
+    result.push({ bullish: sC >= sO });
   }
-  const sClose = ema(ha.map(x => x.c), smooth);
-  const sOpen = ema(ha.map(x => x.o), smooth);
-  return sClose.map((c, i) => ({ bullish: c >= sOpen[i], c, o: sOpen[i] }));
+  return result;
 }
 
-// === HalfTrend ===
-function calcHalfTrend(candles, atrLen = 14, amplitude = 2) {
+function calcHT(candles) {
+  var atrLen = 14, amp = 2;
   if (candles.length < atrLen + 2) return [];
-  // ATR
-  function atr(data, len) {
-    let trs = [];
-    for (let i = 1; i < data.length; i++) {
-      const tr = Math.max(
-        data[i].h - data[i].l,
-        Math.abs(data[i].h - data[i - 1].c),
-        Math.abs(data[i].l - data[i - 1].c)
-      );
-      trs.push(tr);
-    }
-    let atrArr = [trs.slice(0, len).reduce((a, b) => a + b, 0) / len];
-    for (let i = len; i < trs.length; i++) {
-      atrArr.push((atrArr[atrArr.length - 1] * (len - 1) + trs[i]) / len);
-    }
-    return atrArr;
+  var trs = [];
+  for (var i = 1; i < candles.length; i++) {
+    trs.push(Math.max(
+      candles[i].h - candles[i].l,
+      Math.abs(candles[i].h - candles[i-1].c),
+      Math.abs(candles[i].l - candles[i-1].c)
+    ));
   }
-  const atrVals = atr(candles, atrLen);
-  const offset = candles.length - atrVals.length;
-  let trend = 0, nextTrend = 0, maxLow = candles[0].l, minHigh = candles[0].h;
-  let up = candles[0].l, dn = candles[0].h;
-  let results = new Array(candles.length).fill(null);
-
-  for (let i = offset; i < candles.length; i++) {
-    const ai = i - offset;
-    const highPrice = candles[i].h;
-    const lowPrice = candles[i].l;
-    const dev = amplitude * atrVals[ai];
-
-    const highma = (candles[i].h + candles[i].l) / 2 + dev;
-    const lowma = (candles[i].h + candles[i].l) / 2 - dev;
-
+  var atrVal = trs.slice(0, atrLen).reduce(function(a,b){return a+b;},0) / atrLen;
+  var atrArr = [atrVal];
+  for (var j = atrLen; j < trs.length; j++) {
+    atrVal = (atrVal * (atrLen - 1) + trs[j]) / atrLen;
+    atrArr.push(atrVal);
+  }
+  var offset = candles.length - atrArr.length;
+  var trend = 0, nextTrend = 0;
+  var maxLow = candles[0].l, minHigh = candles[0].h;
+  var results = new Array(candles.length).fill(null);
+  for (var ii = 1; ii < candles.length; ii++) {
+    var ai = ii - offset;
+    if (ai < 0) { results[ii] = { bullish: true }; continue; }
+    var dev = amp * atrArr[ai];
+    var highma = (candles[ii].h + candles[ii].l) / 2 + dev;
+    var lowma  = (candles[ii].h + candles[ii].l) / 2 - dev;
     if (nextTrend === 1) {
-      maxLow = Math.max(lowPrice, maxLow);
-      if (highPrice < maxLow && trend !== 1) {
-        trend = 1; nextTrend = 0; dn = highPrice;
-      }
+      maxLow = Math.max(candles[ii].l, maxLow);
+      if (highma < maxLow && trend !== 1) { trend = 1; nextTrend = 0; }
     } else {
-      minHigh = Math.min(highPrice, minHigh);
-      if (lowPrice > minHigh && trend !== 0) {
-        trend = 0; nextTrend = 1; up = lowPrice;
-      }
+      minHigh = Math.min(candles[ii].h, minHigh);
+      if (lowma > minHigh && trend !== 0) { trend = 0; nextTrend = 1; }
     }
-
-    if (trend === 0) {
-      if (lowma > up) up = lowma;
-      results[i] = { bullish: true };
-    } else {
-      if (highma < dn) dn = highma;
-      results[i] = { bullish: false };
-    }
+    results[ii] = { bullish: trend === 0 };
   }
   return results;
 }
 
 function getSignal(candles) {
   if (!candles || candles.length < 20) return null;
-  const sha = calcSHA(candles);
-  const ht = calcHalfTrend(candles);
+  var sha = calcSHA(candles);
+  var ht  = calcHT(candles);
   if (!sha.length || !ht.length) return null;
-  const lastSHA = sha[sha.length - 1];
-  const lastHT = ht[ht.length - 1];
-  if (!lastSHA || !lastHT) return null;
-  if (lastSHA.bullish && lastHT.bullish) return "BUY";
-  if (!lastSHA.bullish && !lastHT.bullish) return "SELL";
+  var s = sha[sha.length - 1];
+  var h = ht[ht.length - 1];
+  if (!s || !h) return null;
+  if (s.bullish && h.bullish)    return "BUY";
+  if (!s.bullish && !h.bullish)  return "SELL";
   return "NEUTRAL";
 }
 
-async function fetchCandles(symbol, multiplier, timespan) {
-  const to = new Date();
-  const from = new Date(to.getTime() - 60 * 60 * 1000 * 2); // 2 hours back
-  const fromStr = from.toISOString().split(".")[0] + "Z";
-  const toStr = to.toISOString().split(".")[0] + "Z";
-  const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=200&apiKey=${API_KEY}`;
-  const res = await fetch(url);
-  const data = await res.json();
+async function loadCandles(symbol, multiplier, timespan) {
+  var to   = new Date();
+  var from = new Date(to.getTime() - 2 * 60 * 60 * 1000);
+  var url = "https://api.polygon.io/v2/aggs/ticker/" + symbol
+    + "/range/" + multiplier + "/" + timespan + "/"
+    + from.toISOString().split(".")[0] + "Z" + "/"
+    + to.toISOString().split(".")[0] + "Z"
+    + "?adjusted=true&sort=asc&limit=200&apiKey=" + API_KEY;
+  var res  = await fetch(url);
+  var data = await res.json();
   if (!data.results) return [];
-  return data.results.map(r => ({ o: r.o, h: r.h, l: r.l, c: r.c, t: r.t }));
-}
-
-// Flash overlay component
-function FlashOverlay({ type, visible }) {
-  if (!visible) return null;
-  const color = type === "BUY" ? "rgba(0,255,120,0.18)" : "rgba(255,60,60,0.18)";
-  const border = type === "BUY" ? "#00ff78" : "#ff3c3c";
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none",
-      backgroundColor: color,
-      border: `4px solid ${border}`,
-      animation: "flashPulse 0.4s ease-in-out infinite alternate",
-    }} />
-  );
-}
-
-function TFCard({ tf, signal, candles, lastPrice }) {
-  const isRequired = tf.required;
-  const bg =
-    signal === "BUY" ? "linear-gradient(135deg,#0a1f14 60%,#0d2e1a)"
-    : signal === "SELL" ? "linear-gradient(135deg,#1f0a0a 60%,#2e0d0d)"
-    : "linear-gradient(135deg,#0e0e14 60%,#14141e)";
-
-  const borderColor =
-    signal === "BUY" ? "#00e87a"
-    : signal === "SELL" ? "#ff3c3c"
-    : "#2a2a3a";
-
-  const signalColor =
-    signal === "BUY" ? "#00e87a"
-    : signal === "SELL" ? "#ff4444"
-    : "#555577";
-
-  const dot =
-    signal === "BUY" ? "#00e87a"
-    : signal === "SELL" ? "#ff4444"
-    : "#444466";
-
-  return (
-    <div style={{
-      background: bg,
-      border: `2px solid ${borderColor}`,
-      borderRadius: 14,
-      padding: "18px 16px",
-      flex: 1,
-      minWidth: 0,
-      display: "flex",
-      flexDirection: "column",
-      gap: 10,
-      boxShadow: signal !== "NEUTRAL" && signal ? `0 0 24px ${borderColor}44` : "none",
-      transition: "all 0.3s ease",
-      position: "relative",
-      overflow: "hidden",
-    }}>
-      {/* Required badge */}
-      <div style={{
-        position: "absolute", top: 10, right: 10,
-        fontSize: 9, fontFamily: "'Space Mono', monospace",
-        color: isRequired ? "#f0c040" : "#444466",
-        background: isRequired ? "#2a2010" : "#111118",
-        border: `1px solid ${isRequired ? "#f0c04066" : "#222230"}`,
-        borderRadius: 4, padding: "2px 6px", letterSpacing: 1,
-      }}>
-        {isRequired ? "REQUIRED" : "CONFIRM"}
-      </div>
-
-      {/* Timeframe label */}
-      <div style={{
-        fontFamily: "'Space Mono', monospace",
-        fontSize: 22, fontWeight: 700,
-        color: "#e0e0ff", letterSpacing: 2,
-      }}>
-        {tf.label}
-      </div>
-
-      {/* Signal */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{
-          width: 10, height: 10, borderRadius: "50%",
-          background: dot,
-          boxShadow: signal !== "NEUTRAL" && signal ? `0 0 8px ${dot}` : "none",
-          flexShrink: 0,
-          animation: signal && signal !== "NEUTRAL" ? "dotPulse 1s ease-in-out infinite" : "none",
-        }} />
-        <div style={{
-          fontFamily: "'Space Mono', monospace",
-          fontSize: 28, fontWeight: 700,
-          color: signalColor,
-          letterSpacing: 1,
-        }}>
-          {signal || "—"}
-        </div>
-      </div>
-
-      {/* SHA + HT breakdown */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-        {["SHA", "HalfTrend"].map((ind, idx) => {
-          const bullish =
-            candles && candles.length >= 20
-              ? idx === 0
-                ? calcSHA(candles).at(-1)?.bullish
-                : calcHalfTrend(candles).at(-1)?.bullish
-              : null;
-          return (
-            <div key={ind} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              background: "#ffffff08", borderRadius: 6, padding: "4px 10px",
-            }}>
-              <span style={{
-                fontFamily: "'Space Mono', monospace", fontSize: 10,
-                color: "#8888aa", letterSpacing: 1,
-              }}>{ind}</span>
-              <span style={{
-                fontFamily: "'Space Mono', monospace", fontSize: 11, fontWeight: 700,
-                color: bullish === null ? "#444466" : bullish ? "#00e87a" : "#ff4444",
-              }}>
-                {bullish === null ? "—" : bullish ? "▲ BULL" : "▼ BEAR"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Last candles indicator */}
-      <div style={{
-        fontFamily: "'Space Mono', monospace", fontSize: 9,
-        color: "#33334a", marginTop: "auto",
-      }}>
-        {candles ? `${candles.length} candles loaded` : "loading..."}
-      </div>
-    </div>
-  );
+  return data.results.map(function(r) {
+    return { o: r.o, h: r.h, l: r.l, c: r.c, t: r.t };
+  });
 }
 
 export default function ScalpingTab() {
-  const [symbol, setSymbol] = useState("SPY");
-  const [inputSymbol, setInputSymbol] = useState("SPY");
-  const [candles, setCandles] = useState({ 0: null, 1: null, 2: null, 3: null });
-  const [signals, setSignals] = useState({ 0: null, 1: null, 2: null, 3: null });
-  const [flash, setFlash] = useState(null); // "BUY" | "SELL" | null
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [aligned, setAligned] = useState(false);
-  const [exitSignal, setExitSignal] = useState(false);
-  const prevSignals = useRef({});
-  const flashTimeout = useRef(null);
+  var [symbol,      setSymbol]      = useState("SPY");
+  var [inputSym,    setInputSym]    = useState("SPY");
+  var [candles,     setCandles]     = useState({});
+  var [signals,     setSignals]     = useState({});
+  var [flash,       setFlash]       = useState(null);
+  var [lastUpdate,  setLastUpdate]  = useState(null);
+  var [loading,     setLoading]     = useState(false);
+  var prevRef   = useRef({});
+  var flashRef  = useRef(null);
 
-  const fetchAll = useCallback(async (sym) => {
+  var fetchAll = useCallback(async function(sym) {
     setLoading(true);
     try {
-      const results = await Promise.all(
-        TIMEFRAMES.map(tf => fetchCandles(sym, tf.multiplier, tf.timespan))
+      var results = await Promise.all(
+        TIMEFRAMES.map(function(tf) {
+          return loadCandles(sym, tf.multiplier, tf.timespan);
+        })
       );
-      const newCandles = {};
-      const newSignals = {};
-      results.forEach((c, i) => {
-        newCandles[i] = c;
-        newSignals[i] = getSignal(c);
-      });
-      setCandles(newCandles);
-      setSignals(newSignals);
+      var nc = {}, ns = {};
+      results.forEach(function(c, i) { nc[i] = c; ns[i] = getSignal(c); });
+      setCandles(nc);
+      setSignals(ns);
       setLastUpdate(new Date().toLocaleTimeString());
 
-      // Alignment check
-      const req5m = newSignals[0] === "BUY";
-      const req2m = newSignals[1] === "BUY";
-      const conf30s = newSignals[2] === "BUY";
-      const conf15s = newSignals[3] === "BUY";
+      var s5  = ns[0], s2 = ns[1], s30 = ns[2], s15 = ns[3];
+      var longFull  = s5==="BUY"  && s2==="BUY"  && s30==="BUY"  && s15==="BUY";
+      var shortFull = s5==="SELL" && s2==="SELL" && s30==="SELL" && s15==="SELL";
 
-      const fullyAligned = req5m && req2m && conf30s && conf15s;
-      const requiredAligned = req5m && req2m;
-      const isAligned = requiredAligned; // required = both 5m+2m buy
+      if (longFull  && !prevRef.current.longFull)  doFlash("BUY");
+      if (shortFull && !prevRef.current.shortFull) doFlash("SELL");
+      if (prevRef.current.longFull  && s15==="SELL") doFlash("SELL");
+      if (prevRef.current.shortFull && s15==="BUY")  doFlash("BUY");
 
-      // Exit: 15sec flips to SELL
-      const wasAligned = prevSignals.current[0] === "BUY" && prevSignals.current[1] === "BUY";
-      const exit15s = wasAligned && newSignals[3] === "SELL";
-
-      setAligned(isAligned && conf30s && conf15s);
-      setExitSignal(exit15s);
-
-      if (fullyAligned && !prevSignals.current.fullyAligned) {
-        triggerFlash("BUY");
-      } else if (exit15s) {
-        triggerFlash("SELL");
-      }
-
-      prevSignals.current = { ...newSignals, fullyAligned };
-    } catch (e) {
-      console.error(e);
-    }
+      prevRef.current = { longFull: longFull, shortFull: shortFull };
+    } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
 
-  function triggerFlash(type) {
+  function doFlash(type) {
     setFlash(type);
-    clearTimeout(flashTimeout.current);
-    flashTimeout.current = setTimeout(() => setFlash(null), 3000);
+    clearTimeout(flashRef.current);
+    flashRef.current = setTimeout(function() { setFlash(null); }, 3000);
   }
 
-  useEffect(() => {
+  useEffect(function() {
     fetchAll(symbol);
-    const interval = setInterval(() => fetchAll(symbol), 10000); // refresh every 10s
-    return () => clearInterval(interval);
+    var t = setInterval(function() { fetchAll(symbol); }, 10000);
+    return function() { clearInterval(t); };
   }, [symbol, fetchAll]);
 
-  const handleGo = () => {
-    const s = inputSymbol.trim().toUpperCase();
-    if (s) setSymbol(s);
-  };
+  var s5  = signals[0], s2 = signals[1], s30 = signals[2], s15 = signals[3];
+  var longReady  = s5==="BUY"  && s2==="BUY";
+  var shortReady = s5==="SELL" && s2==="SELL";
+  var longFull   = longReady  && s30==="BUY"  && s15==="BUY";
+  var shortFull  = shortReady && s30==="SELL" && s15==="SELL";
+  var exitL = longReady  && s15==="SELL";
+  var exitS = shortReady && s15==="BUY";
 
-  const allBuy = signals[0] === "BUY" && signals[1] === "BUY";
-  const statusText = exitSignal
-    ? "⚡ EXIT NOW — 15s SELL"
-    : aligned
-    ? "🟢 FULL ALIGNMENT — BUY"
-    : allBuy
-    ? "🟡 5m+2m ALIGNED — WAIT FOR 15s"
-    : "⏳ WAITING FOR SETUP";
+  var stText =
+    exitL      ? "EXIT LONG — 15s SELL" :
+    exitS      ? "EXIT SHORT — 15s BUY" :
+    longFull   ? "FULL LONG — BUY NOW" :
+    shortFull  ? "FULL SHORT — SELL NOW" :
+    longReady  ? "5m+2m BULL — WAIT 15s" :
+    shortReady ? "5m+2m BEAR — WAIT 15s" :
+    "WAITING FOR SETUP";
 
-  const statusColor = exitSignal ? "#ff3c3c"
-    : aligned ? "#00e87a"
-    : allBuy ? "#f0c040"
-    : "#555577";
+  var stIcon =
+    (exitL||exitS) ? "EXIT" :
+    longFull   ? "BUY" :
+    shortFull  ? "SELL" :
+    longReady  ? "WAIT" :
+    shortReady ? "WAIT" : "WAIT";
+
+  var stColor =
+    (exitL||exitS) ? "#ff3c3c" :
+    longFull   ? "#00e87a" :
+    shortFull  ? "#ff3c3c" :
+    longReady  ? "#f0c040" :
+    shortReady ? "#ff9800" : "#555577";
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#07070f",
-      fontFamily: "'Space Mono', monospace",
-      padding: "0",
-      position: "relative",
-    }}>
+    <div style={{minHeight:"100vh",background:"#07070f",fontFamily:"'Courier New',monospace",padding:"20px 16px"}}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Orbitron:wght@700;900&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        @keyframes flashPulse {
-          from { opacity: 0.7; }
-          to { opacity: 1; }
-        }
-        @keyframes dotPulse {
-          0%,100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.5); opacity: 0.7; }
-        }
-        @keyframes statusPulse {
-          0%,100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-        @keyframes scanLine {
-          0% { transform: translateY(-100%); }
-          100% { transform: translateY(100vh); }
-        }
-        input { outline: none; }
-        input:focus { border-color: #00e87a !important; }
+        @keyframes flashPulse{from{opacity:.7}to{opacity:1}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
       `}</style>
 
-      {/* Scan line effect */}
-      <div style={{
-        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
-        overflow: "hidden", opacity: 0.03,
-      }}>
+      {flash && (
         <div style={{
-          width: "100%", height: 2, background: "#00e87a",
-          animation: "scanLine 4s linear infinite",
-        }} />
-      </div>
+          position:"fixed",inset:0,zIndex:9999,pointerEvents:"none",
+          backgroundColor: flash==="BUY" ? "rgba(0,232,122,.18)" : "rgba(255,60,60,.18)",
+          border: "4px solid " + (flash==="BUY" ? "#00e87a" : "#ff3c3c"),
+          animation:"flashPulse .4s ease-in-out infinite alternate"
+        }}/>
+      )}
 
-      <FlashOverlay type={flash} visible={!!flash} />
+      <div style={{maxWidth:1100,margin:"0 auto"}}>
 
-      <div style={{ position: "relative", zIndex: 1, padding: "24px 20px", maxWidth: 1100, margin: "0 auto" }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={{
-            fontFamily: "'Orbitron', monospace",
-            fontSize: 13, color: "#00e87a", letterSpacing: 4,
-            marginBottom: 4, opacity: 0.8,
-          }}>ATM MACHINE — SCALP MODULE</div>
-          <div style={{
-            fontFamily: "'Orbitron', monospace",
-            fontSize: 28, color: "#e0e0ff", letterSpacing: 2, fontWeight: 900,
-          }}>MULTI-TF ALIGNMENT</div>
-          <div style={{ fontSize: 10, color: "#333355", marginTop: 4 }}>
-            SHA + HALFTREND · 5MIN · 2MIN · 30SEC · 15SEC
-          </div>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,color:"#00e87a",letterSpacing:4,marginBottom:4}}>ATM MACHINE — SCALP</div>
+          <div style={{fontSize:22,fontWeight:700,color:"#e0e0ff",letterSpacing:2}}>MULTI-TF SCANNER</div>
+          <div style={{fontSize:10,color:"#333355",marginTop:4}}>SHA + HALFTREND · LONG AND SHORT · 5M/2M/30S/15S</div>
         </div>
 
-        {/* Symbol input */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center" }}>
-          <input
-            value={inputSymbol}
-            onChange={e => setInputSymbol(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === "Enter" && handleGo()}
-            placeholder="SYMBOL"
-            style={{
-              background: "#0e0e1a", border: "2px solid #2a2a3a",
-              borderRadius: 8, padding: "10px 16px",
-              color: "#e0e0ff", fontFamily: "'Space Mono', monospace",
-              fontSize: 18, fontWeight: 700, letterSpacing: 2,
-              width: 140, transition: "border-color 0.2s",
-            }}
-          />
-          <button
-            onClick={handleGo}
-            style={{
-              background: "#00e87a", border: "none", borderRadius: 8,
-              padding: "10px 24px", color: "#07070f",
-              fontFamily: "'Space Mono', monospace", fontSize: 13,
-              fontWeight: 700, cursor: "pointer", letterSpacing: 1,
-              transition: "opacity 0.2s",
-            }}
-            onMouseEnter={e => e.target.style.opacity = 0.8}
-            onMouseLeave={e => e.target.style.opacity = 1}
-          >
+        <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+          <input value={inputSym}
+            onChange={function(e){setInputSym(e.target.value.toUpperCase());}}
+            onKeyDown={function(e){if(e.key==="Enter"){var s=inputSym.trim().toUpperCase();if(s)setSymbol(s);}}}
+            style={{width:130,background:"#0e0e1a",border:"2px solid #2a2a4a",borderRadius:8,
+              padding:"9px 14px",color:"#00e87a",fontFamily:"inherit",fontSize:16,fontWeight:700,outline:"none"}}/>
+          <button onClick={function(){var s=inputSym.trim().toUpperCase();if(s)setSymbol(s);}}
+            style={{background:"#00e87a",border:"none",borderRadius:8,padding:"9px 20px",
+              color:"#07070f",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
             LOAD
           </button>
-          <button
-            onClick={() => fetchAll(symbol)}
-            style={{
-              background: "transparent", border: "2px solid #2a2a3a", borderRadius: 8,
-              padding: "10px 18px", color: "#8888aa",
-              fontFamily: "'Space Mono', monospace", fontSize: 11,
-              cursor: "pointer", letterSpacing: 1,
-            }}
-          >
-            {loading ? "..." : "↺ REFRESH"}
+          <button onClick={function(){fetchAll(symbol);}}
+            style={{background:"transparent",border:"2px solid #2a2a4a",borderRadius:8,
+              padding:"9px 16px",color:"#888",fontFamily:"inherit",fontSize:11,cursor:"pointer"}}>
+            {loading?"...":"REFRESH"}
           </button>
-          <div style={{ marginLeft: "auto", fontSize: 10, color: "#333355" }}>
-            {lastUpdate ? `LAST: ${lastUpdate}` : ""}
-            <br />AUTO-REFRESH 10s
+          <div style={{marginLeft:"auto",fontSize:10,color:"#333355"}}>
+            {lastUpdate?"LAST: "+lastUpdate:""}<br/>AUTO 10s
           </div>
         </div>
 
-        {/* Status bar */}
         <div style={{
-          background: "#0e0e1a",
-          border: `2px solid ${statusColor}`,
-          borderRadius: 12, padding: "14px 20px",
-          marginBottom: 20,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          boxShadow: `0 0 30px ${statusColor}22`,
-          animation: (aligned || exitSignal) ? "statusPulse 1s ease-in-out infinite" : "none",
+          background:"#0e0e1a",border:"2px solid "+stColor,borderRadius:12,
+          padding:"13px 18px",marginBottom:18,
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          boxShadow:"0 0 24px "+stColor+"33",
+          animation:(longFull||shortFull||exitL||exitS)?"pulse 1s infinite":"none"
         }}>
-          <div style={{
-            fontFamily: "'Orbitron', monospace",
-            fontSize: 16, fontWeight: 900,
-            color: statusColor, letterSpacing: 2,
-          }}>
-            {statusText}
+          <div style={{fontSize:15,fontWeight:700,color:stColor,letterSpacing:1}}>
+            {stIcon==="BUY"?"🟢":stIcon==="SELL"?"🔴":stIcon==="EXIT"?"⚡":"⏳"} {stText}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[0, 1, 2, 3].map(i => (
+          <div style={{display:"flex",gap:6}}>
+            {[0,1,2,3].map(function(i){
+              var sig=signals[i];
+              var bc=sig==="BUY"?"#00e87a":sig==="SELL"?"#ff3c3c":"#2a2a3a";
+              return(
+                <div key={i} style={{width:26,height:26,borderRadius:5,
+                  background:sig==="BUY"?"#00e87a22":sig==="SELL"?"#ff3c3c22":"#fff1",
+                  border:"2px solid "+bc,display:"flex",alignItems:"center",
+                  justifyContent:"center",fontSize:10,
+                  color:sig==="BUY"?"#00e87a":sig==="SELL"?"#ff3c3c":"#444",fontWeight:700}}>
+                  {sig==="BUY"?"▲":sig==="SELL"?"▼":"—"}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+          {TIMEFRAMES.map(function(tf, i){
+            var sig    = signals[i];
+            var cands  = candles[i];
+            var isBuy  = sig==="BUY";
+            var isSell = sig==="SELL";
+            var bc     = isBuy?"#00e87a":isSell?"#ff3c3c":"#2a2a3a";
+            var sc     = isBuy?"#00e87a":isSell?"#ff4444":"#555577";
+            var bg     = isBuy?"linear-gradient(135deg,#0a1f14,#0d2e1a)"
+                        :isSell?"linear-gradient(135deg,#1f0a0a,#2e0d0d)"
+                        :"linear-gradient(135deg,#0e0e14,#14141e)";
+
+            var shaArr = cands && cands.length>=20 ? calcSHA(cands) : [];
+            var htArr  = cands && cands.length>=20 ? calcHT(cands)  : [];
+            var shaL   = shaArr.length>0 ? shaArr[shaArr.length-1] : null;
+            var htL    = htArr.length >0 ? htArr[htArr.length -1]  : null;
+
+            return (
               <div key={i} style={{
-                width: 28, height: 28, borderRadius: 6,
-                background: signals[i] === "BUY" ? "#00e87a22"
-                  : signals[i] === "SELL" ? "#ff3c3c22" : "#ffffff08",
-                border: `2px solid ${signals[i] === "BUY" ? "#00e87a"
-                  : signals[i] === "SELL" ? "#ff3c3c" : "#2a2a3a"}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 10, color: signals[i] === "BUY" ? "#00e87a"
-                  : signals[i] === "SELL" ? "#ff3c3c" : "#333355",
-                fontWeight: 700,
+                background:bg,border:"2px solid "+bc,borderRadius:12,
+                padding:"16px 14px",flex:1,minWidth:160,
+                display:"flex",flexDirection:"column",gap:8,
+                boxShadow:(isBuy||isSell)?"0 0 20px "+bc+"44":"none",
+                position:"relative",overflow:"hidden"
               }}>
-                {signals[i] === "BUY" ? "▲" : signals[i] === "SELL" ? "▼" : "—"}
+                <div style={{position:"absolute",top:8,right:8,fontSize:9,
+                  color:tf.required?"#f0c040":"#444",
+                  background:tf.required?"#2a2010":"#111118",
+                  border:"1px solid "+(tf.required?"#f0c04066":"#222230"),
+                  borderRadius:4,padding:"2px 5px"}}>
+                  {tf.required?"REQUIRED":"CONFIRM"}
+                </div>
+                <div style={{fontSize:20,fontWeight:700,color:"#e0e0ff"}}>{tf.label}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{width:9,height:9,borderRadius:"50%",background:sc,flexShrink:0}}/>
+                  <div style={{fontSize:24,fontWeight:700,color:sc}}>{sig||"—"}</div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  <div style={{display:"flex",justifyContent:"space-between",
+                    background:"#fff1",borderRadius:5,padding:"3px 8px"}}>
+                    <span style={{fontSize:9,color:"#888"}}>SHA</span>
+                    <span style={{fontSize:10,fontWeight:700,
+                      color:shaL===null?"#444":shaL.bullish?"#00e87a":"#ff4444"}}>
+                      {shaL===null?"—":shaL.bullish?"▲ BULL":"▼ BEAR"}
+                    </span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",
+                    background:"#fff1",borderRadius:5,padding:"3px 8px"}}>
+                    <span style={{fontSize:9,color:"#888"}}>HT</span>
+                    <span style={{fontSize:10,fontWeight:700,
+                      color:htL===null?"#444":htL.bullish?"#00e87a":"#ff4444"}}>
+                      {htL===null?"—":htL.bullish?"▲ BULL":"▼ BEAR"}
+                    </span>
+                  </div>
+                </div>
+                <div style={{fontSize:9,color:"#33334a",marginTop:"auto"}}>
+                  {cands?cands.length+" candles":"loading..."}
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
-        {/* 4 TF Cards */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-          {TIMEFRAMES.map((tf, i) => (
-            <TFCard
-              key={i}
-              tf={tf}
-              signal={signals[i]}
-              candles={candles[i]}
-              lastPrice={candles[i]?.at(-1)?.c}
-            />
-          ))}
-        </div>
-
-        {/* Rules reminder */}
-        <div style={{
-          background: "#0a0a14", border: "1px solid #1a1a2a",
-          borderRadius: 10, padding: "14px 18px",
-          display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 10,
-        }}>
+        <div style={{background:"#0a0a14",border:"1px solid #1a1a2a",
+          borderRadius:10,padding:"12px 16px",
+          display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
           {[
-            { icon: "🟢", text: "5m + 2m BUY = READY TO TRADE" },
-            { icon: "⚡", text: "ALL 4 BUY = FULL SEND — ENTER NOW" },
-            { icon: "🚪", text: "15s SELL SIGNAL = EXIT IMMEDIATELY" },
-          ].map((r, i) => (
-            <div key={i} style={{
-              display: "flex", gap: 8, alignItems: "flex-start",
-              fontSize: 10, color: "#555577", letterSpacing: 0.5, lineHeight: 1.5,
-            }}>
-              <span>{r.icon}</span>
-              <span>{r.text}</span>
-            </div>
-          ))}
+            {i:"🟢",t:"5m+2m BUY = LONG READY"},
+            {i:"🔴",t:"5m+2m SELL = SHORT READY"},
+            {i:"⚡",t:"ALL 4 AGREE = ENTER NOW"},
+            {i:"🚪",t:"15s SELL flip = EXIT LONG"},
+            {i:"🚪",t:"15s BUY flip = EXIT SHORT"},
+            {i:"🔄",t:"Next signal = RE-ENTER"},
+          ].map(function(r,i){
+            return(
+              <div key={i} style={{display:"flex",gap:6,fontSize:10,color:"#555577",lineHeight:1.5}}>
+                <span>{r.i}</span><span>{r.t}</span>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Symbol display */}
-        <div style={{ textAlign: "center", marginTop: 16, fontSize: 10, color: "#222233" }}>
-          MONITORING: {symbol} · POLYGON.IO REAL-TIME DATA
+        <div style={{textAlign:"center",marginTop:14,fontSize:10,color:"#222233"}}>
+          {symbol} · POLYGON.IO REAL-TIME
         </div>
       </div>
     </div>
