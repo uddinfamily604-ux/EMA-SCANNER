@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import MoonCalendar from './MoonCalendar';
 import MarketOracle from './MarketOracle';
+import ScalpingTab from './ScalpingTab';
+
 
 // ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
 function useMobile() {
@@ -5059,6 +5061,20 @@ export default function App(){
       {id:"human",   label:"🧬 HUMAN",    color:"#00e676"},
       {id:"moon",    label:"🌙 MOON CAL", color:"#00b4d8"},
       {id:"oracle",  label:"🔮 ORACLE",   color:"#e040fb"},
+      {id:"scalp",   label:"⚡ SCALP",    color:"#00e87a"},
+```
+
+---
+
+**Change 3 — Tab content**
+
+Search for this exact text:
+```
+{activeTab==="oracle"&&(
+```
+Find the closing block which ends with:
+```
+)}
     ],
   ];
   const tabs = tabRows.flat();
@@ -5164,6 +5180,18 @@ export default function App(){
     <MarketOracle initialDate={oracleDate}/>
   </div>
 )}
+  {activeTab==="scalp"&&(
+  <div style={{flex:1,overflowY:"auto",background:"#07070f",padding:"0"}}>
+    <ScalpingTab/>
+  </div>
+)}
+```
+
+---
+
+Then **Change 1** — Search for:
+```
+import MarketOracle from './MarketOracle';
         </div>
 
         {/* RIGHT SIDEBAR — hidden on mobile (AlertSettings accessible via scanner settings) */}
