@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import MoonCalendar from './MoonCalendar';
 import MarketOracle from './MarketOracle';
 import ScalpingTab from './ScalpingTab';
+import ScalpBacktest from './ScalpBacktest';
+
 
 
 // ─── MOBILE HOOK ──────────────────────────────────────────────────────────────
@@ -5062,6 +5064,7 @@ export default function App(){
       {id:"moon",    label:"🌙 MOON CAL", color:"#00b4d8"},
       {id:"oracle",  label:"🔮 ORACLE",   color:"#e040fb"},
       {id:"scalp",   label:"⚡ SCALP",    color:"#00e87a"},
+      {id:"backtest", label:"🧪 BACKTEST", color:"#f59e0b"},
 ```
 
 ---
@@ -5183,6 +5186,11 @@ Find the closing block which ends with:
   {activeTab==="scalp"&&(
   <div style={{flex:1,overflowY:"auto",background:"#07070f",padding:"0"}}>
     <ScalpingTab/>
+  </div>
+)}
+{activeTab==="backtest"&&(
+  <div style={{flex:1,overflowY:"auto",background:"#07070f",padding:"0"}}>
+    <ScalpBacktest/>
   </div>
 )}
 ```
