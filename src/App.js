@@ -5065,21 +5065,6 @@ export default function App(){
       {id:"oracle",  label:"🔮 ORACLE",   color:"#e040fb"},
       {id:"scalp",   label:"⚡ SCALP",    color:"#00e87a"},
       {id:"backtest", label:"🧪 BACKTEST", color:"#f59e0b"},
-```
-
----
-
-**Change 3 — Tab content**
-
-Search for this exact text:
-```
-{activeTab==="oracle"&&(
-```
-Find the closing block which ends with:
-```
-)}
-    ],
-  ];
   const tabs = tabRows.flat();
 
   const isMobile = useMobile();
