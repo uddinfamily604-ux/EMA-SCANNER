@@ -3035,7 +3035,7 @@ function FinancialAstrology({goToHTScanner}) {
     return {name:"Waning Crescent",symbol:"🌘",energy:"Rest, consolidation"};
   };
 
- const now = new Date();
+  const now = new Date();
   const TODAY = [now.getFullYear(), now.getMonth()+1, now.getDate()];
   const [selectedDate, setSelectedDate] = useState(now.toISOString().split("T")[0]);
 
@@ -3063,7 +3063,7 @@ function FinancialAstrology({goToHTScanner}) {
     }
     setLoading(true);
     setTimeout(() => {
-      const r = analyzeStock(info.date, transitDate);
+      const r = analyzeStock(stock.date, transitDate);
       const ceo = CEO_DB[s];
       let ceoResult = null;
       if (ceo && ceo.dob) {
@@ -3086,8 +3086,13 @@ function FinancialAstrology({goToHTScanner}) {
     setTimeout(() => {
       const results = Object.entries(IPO_DB).map(([sym, info]) => {
         const r = analyzeStock(info.date, transitDate);
+        const ceo = CEO_DB[sym];
+        let combined = r.score;
+        if (ceo && ceo.dob) {
+          const cr = analyzeStock(ceo.dob, transitDate);
           combined = Math.max(-10, Math.min(10, r.score * 0.6 + cr.score * 0.4));
         }
+        
         const verdict = combined>=4?"STRONG BULL":combined>=2?"BULLISH":combined<=-4?"STRONG BEAR":combined<=-2?"BEARISH":"NEUTRAL";
         const verdictColor = combined>=4?"#00e676":combined>=2?"#38bdf8":combined<=-4?"#ff1744":combined<=-2?"#ff5252":"#f59e0b";
         return {symbol:sym, name:info.name, score:combined, stockScore:r.score, verdict, verdictColor};
