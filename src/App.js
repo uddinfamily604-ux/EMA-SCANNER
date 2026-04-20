@@ -3035,8 +3035,24 @@ function FinancialAstrology({goToHTScanner}) {
     return {name:"Waning Crescent",symbol:"🌘",energy:"Rest, consolidation"};
   };
 
-  const now = new Date();
+ const now = new Date();
   const TODAY = [now.getFullYear(), now.getMonth()+1, now.getDate()];
+  const [selectedDate, setSelectedDate] = useState(now.toISOString().split("T")[0]);
+
+  const parseSelectedDate = (dateStr) => {
+    const [y,m,d] = dateStr.split("-").map(Number);
+    return [y,m,d];
+  };
+  const transitDate = parseSelectedDate(selectedDate);
+  const isToday = selectedDate === now.toISOString().split("T")[0];
+  const isFuture = selectedDate > now.toISOString().split("T")[0];
+  const isPast = selectedDate < now.toISOString().split("T")[0];
+
+  const shiftDate = (days) => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + days);
+    setSelectedDate(d.toISOString().split("T")[0]);
+  };
 
   const analyze = (sym) => {
     const s = sym.toUpperCase().trim();
@@ -3047,11 +3063,11 @@ function FinancialAstrology({goToHTScanner}) {
     }
     setLoading(true);
     setTimeout(() => {
-      const r = analyzeStock(stock.date, TODAY);
+      const r = analyzeStock(info.date, transitDate);
       const ceo = CEO_DB[s];
       let ceoResult = null;
       if (ceo && ceo.dob) {
-        ceoResult = analyzeStock(ceo.dob, TODAY);
+        ceoResult = analyzeStock(ceo.dob, transitDate);
         ceoResult.ceoName = ceo.name;
         ceoResult.ceoDob = ceo.dob;
       }
@@ -3060,7 +3076,7 @@ function FinancialAstrology({goToHTScanner}) {
         : r.score;
       const combinedVerdict = combinedScore>=4?"STRONG BULL":combinedScore>=2?"BULLISH":combinedScore<=-4?"STRONG BEAR":combinedScore<=-2?"BEARISH":"NEUTRAL";
       const combinedColor = combinedScore>=4?"#00e676":combinedScore>=2?"#38bdf8":combinedScore<=-4?"#ff1744":combinedScore<=-2?"#ff5252":"#f59e0b";
-      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date, ceoResult, combinedScore, combinedVerdict, combinedColor});
+      setResult({...r, symbol:s, name:stock.name, ipoDate:stock.date, ceoResult, combinedScore, combinedVerdict, combinedColor, transitDate});
       setLoading(false);
     }, 100);
   };
@@ -3069,11 +3085,7 @@ function FinancialAstrology({goToHTScanner}) {
     setScanning(true);
     setTimeout(() => {
       const results = Object.entries(IPO_DB).map(([sym, info]) => {
-        const r = analyzeStock(info.date, TODAY);
-        const ceo = CEO_DB[sym];
-        let combined = r.score;
-        if (ceo && ceo.dob) {
-          const cr = analyzeStock(ceo.dob, TODAY);
+        const r = analyzeStock(info.date, transitDate);
           combined = Math.max(-10, Math.min(10, r.score * 0.6 + cr.score * 0.4));
         }
         const verdict = combined>=4?"STRONG BULL":combined>=2?"BULLISH":combined<=-4?"STRONG BEAR":combined<=-2?"BEARISH":"NEUTRAL";
@@ -3148,6 +3160,35 @@ function FinancialAstrology({goToHTScanner}) {
               ))}
             </div>
 
+            {/* DATE PICKER */}
+            <div style={{background:"#0d1e30",border:`1px solid ${isFuture?"#e040fb44":isPast?"#38bdf844":"#00e67644"}`,borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+              <div style={{fontSize:9,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:8}}>
+                🗓️ ANALYSIS DATE
+                {isFuture&&<span style={{color:"#e040fb",marginLeft:8,fontWeight:700}}>🔮 FUTURE FORECAST</span>}
+                {isPast&&<span style={{color:"#38bdf8",marginLeft:8,fontWeight:700}}>📜 HISTORICAL</span>}
+                {isToday&&<span style={{color:"#00e676",marginLeft:8,fontWeight:700}}>✅ TODAY</span>}
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                <input type="date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value);if(symbol)analyze(symbol);}}
+                  style={{background:"#080e1a",border:`1px solid ${isFuture?"#e040fb":isPast?"#38bdf8":"#00e676"}`,borderRadius:4,color:"#e8f4ff",padding:"7px 10px",fontSize:12,fontFamily:"monospace",outline:"none"}}/>
+                {[[-90,"−90d"],[-30,"−30d"],[-7,"−7d"],[0,"TODAY"],[7,"+7d"],[30,"+30d"],[90,"+90d"],[180,"+180d"]].map(([days,label])=>(
+                  <button key={days} onClick={()=>{
+                    if(days===0){const t=new Date();setSelectedDate(t.toISOString().split("T")[0]);}
+                    else shiftDate(days);
+                    setTimeout(()=>{if(symbol)analyze(symbol);},10);
+                  }} style={{padding:"5px 9px",background:days===0&&isToday?"#00e67622":"#080e1a",
+                    border:`1px solid ${days===0&&isToday?"#00e676":"#1e3a5a"}`,
+                    borderRadius:4,color:days===0&&isToday?"#00e676":"#3a6e9a",
+                    fontSize:10,cursor:"pointer",fontFamily:"monospace",fontWeight:days===0?"700":"400"}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:9,color:"#3a6e9a",marginTop:6}}>
+                Showing planetary energy for <span style={{color:"#e8f4ff",fontWeight:700}}>{selectedDate}</span> — change date to see past/future forecasts
+              </div>
+            </div>
+
             {loading&&<div style={{textAlign:"center",padding:40,color:"#3a6e9a",fontSize:12}}>&#127756; Reading planetary positions...</div>}
 
             {result&&result.error&&(
@@ -3162,8 +3203,9 @@ function FinancialAstrology({goToHTScanner}) {
                     <div>
                       <div style={{fontSize:10,color:"#3a6e9a",letterSpacing:"0.1em",marginBottom:4}}>PLANETARY ENERGY</div>
                       <div style={{fontSize:22,fontWeight:700,color:"#e8f4ff"}}>{result.symbol} — {result.name}</div>
-                      <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]} · Today: {TODAY[2]}/{TODAY[1]}/{TODAY[0]}</div>
+                      <div style={{fontSize:11,color:"#3a6e9a",marginTop:2}}>IPO: {result.ipoDate[2]}/{result.ipoDate[1]}/{result.ipoDate[0]} · Analysis: {selectedDate}{isToday?" (Today)":isFuture?" 🔮":isPast?" 📜":""}</div>
                     </div>
+  
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:28,fontWeight:700,color:result.verdictColor}}>{result.score.toFixed(1)}</div>
                       <div style={{fontSize:10,color:"#3a6e9a"}}>/ 10</div>
